@@ -1,10 +1,10 @@
 [build-system]
-requires = ["hatchling>=1.24"]
+requires = ["hatchling>=1.24", "hatch-vcs>=0.4"]
 build-backend = "hatchling.build"
 
 [project]
 name = "verstka-sdk"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Python SDK for Verstka API v2: open editor sessions, verify callbacks, download and process material content (media + fonts)."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -55,6 +55,9 @@ dev = [
 [project.urls]
 Repository = "https://github.com/verstka/verstka-sdk-python"
 Issues = "https://github.com/verstka/verstka-sdk-python/issues"
+
+[tool.hatch.version]
+source = "vcs"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/verstka_sdk"]

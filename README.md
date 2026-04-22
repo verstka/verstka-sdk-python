@@ -610,14 +610,17 @@ The callback response shape is identical:
 ## Development
 
 ```bash
-python3.10 -m venv .venv
-source .venv/bin/activate
+python3.10 -m venv venv
+source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -e '.[dev]'
 
 pytest
 ruff check src tests
 mypy src
 ```
+
+The repository `.gitignore` ignores both `venv/` and `.venv/` — use whichever
+path you prefer locally.
 
 ## Changelog
 
