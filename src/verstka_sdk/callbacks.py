@@ -9,7 +9,8 @@ and expose a clean storage-adapter contract:
 - :meth:`CallbackProcessor.process_fonts_callback_sync` /
   :meth:`~CallbackProcessor.process_fonts_callback_async`
 
-Each entry point accepts two user hooks:
+Each entry point accepts a required ``signature`` argument (hex HMAC from the
+HTTP ``X-Verstka-Signature`` header) plus two user hooks:
 
 - ``on_pre_save`` (optional) — invoked right after signature verification and
   before the ZIP is downloaded. Returns a
@@ -123,15 +124,22 @@ class FontsCallbackResult:
 # Shared helpers                                                              #
 # --------------------------------------------------------------------------- #
 
-def _verify_callback(data: CallbackData, secret: str, *, debug: bool) -> None:
+def _verify_callback(
+    data: CallbackData,
+    signature: str,
+    secret: str,
+    *,
+    debug: bool,
+) -> None:
+    """Verify HMAC using ``signature`` from the HTTP ``X-Verstka-Signature`` header only."""
     content_url = str(data.get("content_url") or "")
     material_id = str(data.get("material_id") or "")
-    signature = str(data.get("signature") or "")
+    sig = str(signature or "")
 
-    if not verify_signature(material_id, content_url, signature, secret):
+    if not verify_signature(material_id, content_url, sig, secret):
         if debug:
             raise VerstkaSignatureError(
-                f"Invalid signature {signature!r} for material_id={material_id!r}"
+                f"Invalid signature {sig!r} for material_id={material_id!r}"
             )
         raise VerstkaSignatureError()
 
@@ -301,18 +309,24 @@ class CallbackProcessor:
         self,
         callback_data: CallbackData,
         *,
+        signature: str,
         storage: StorageAdapter,
         on_finalize: ContentFinalizeFn,
         on_pre_save: ContentPreSaveFn | None = None,
     ) -> MaterialCallbackResult:
-        _verify_callback(callback_data, self.config.api_secret, debug=self.config.debug)
+        _verify_callback(
+            callback_data,
+            signature,
+            self.config.api_secret,
+            debug=self.config.debug,
+        )
 
         material_id = str(callback_data.get("material_id") or "")
         if not material_id:
             raise VerstkaCallbackDataError("material_id is required")
 
         content_url = str(callback_data.get("content_url") or "")
-        signature = str(callback_data.get("signature") or "")
+        sig = str(signature or "")
         metadata = dict(callback_data.get("metadata") or {})
 
         if on_pre_save is not None:
@@ -339,7 +353,7 @@ class CallbackProcessor:
         extracted: ExtractedContent | None = None
         try:
             if content_url:
-                extracted = self._download_material_sync(content_url, material_id, signature)
+                extracted = self._download_material_sync(content_url, material_id, sig)
 
             vms_json_dict = _parse_vms_json(extracted["vms_json"]) if extracted else None
             vms_html = extracted["vms_html"] if extracted else None
@@ -384,18 +398,24 @@ class CallbackProcessor:
         self,
         callback_data: CallbackData,
         *,
+        signature: str,
         storage: AsyncStorageAdapter,
         on_finalize: AsyncContentFinalizeFn,
         on_pre_save: AsyncContentPreSaveFn | None = None,
     ) -> MaterialCallbackResult:
-        _verify_callback(callback_data, self.config.api_secret, debug=self.config.debug)
+        _verify_callback(
+            callback_data,
+            signature,
+            self.config.api_secret,
+            debug=self.config.debug,
+        )
 
         material_id = str(callback_data.get("material_id") or "")
         if not material_id:
             raise VerstkaCallbackDataError("material_id is required")
 
         content_url = str(callback_data.get("content_url") or "")
-        signature = str(callback_data.get("signature") or "")
+        sig = str(signature or "")
         metadata = dict(callback_data.get("metadata") or {})
 
         if on_pre_save is not None:
@@ -422,7 +442,7 @@ class CallbackProcessor:
         extracted: ExtractedContent | None = None
         try:
             if content_url:
-                extracted = await self._download_material_async(content_url, material_id, signature)
+                extracted = await self._download_material_async(content_url, material_id, sig)
 
             vms_json_dict = _parse_vms_json(extracted["vms_json"]) if extracted else None
             vms_html = extracted["vms_html"] if extracted else None
@@ -469,15 +489,21 @@ class CallbackProcessor:
         self,
         callback_data: CallbackData,
         *,
+        signature: str,
         storage: StorageAdapter,
         on_finalize: FontsFinalizeFn | None = None,
         on_pre_save: FontsPreSaveFn | None = None,
     ) -> FontsCallbackResult:
-        _verify_callback(callback_data, self.config.api_secret, debug=self.config.debug)
+        _verify_callback(
+            callback_data,
+            signature,
+            self.config.api_secret,
+            debug=self.config.debug,
+        )
 
         material_id = str(callback_data.get("material_id") or "")
         content_url = str(callback_data.get("content_url") or "")
-        signature = str(callback_data.get("signature") or "")
+        sig = str(signature or "")
         metadata = dict(callback_data.get("metadata") or {})
         fonts_payload = dict(callback_data.get("fonts") or {})
 
@@ -503,7 +529,7 @@ class CallbackProcessor:
 
         extracted: ExtractedFonts | None = None
         try:
-            extracted = self._download_fonts_sync(content_url, material_id, signature)
+            extracted = self._download_fonts_sync(content_url, material_id, sig)
 
             saved_font_urls: dict[str, str] = {}
             for basename, temp_path in extracted["font_files"].items():
@@ -554,15 +580,21 @@ class CallbackProcessor:
         self,
         callback_data: CallbackData,
         *,
+        signature: str,
         storage: AsyncStorageAdapter,
         on_finalize: AsyncFontsFinalizeFn | None = None,
         on_pre_save: AsyncFontsPreSaveFn | None = None,
     ) -> FontsCallbackResult:
-        _verify_callback(callback_data, self.config.api_secret, debug=self.config.debug)
+        _verify_callback(
+            callback_data,
+            signature,
+            self.config.api_secret,
+            debug=self.config.debug,
+        )
 
         material_id = str(callback_data.get("material_id") or "")
         content_url = str(callback_data.get("content_url") or "")
-        signature = str(callback_data.get("signature") or "")
+        sig = str(signature or "")
         metadata = dict(callback_data.get("metadata") or {})
         fonts_payload = dict(callback_data.get("fonts") or {})
 
@@ -588,7 +620,7 @@ class CallbackProcessor:
 
         extracted: ExtractedFonts | None = None
         try:
-            extracted = await self._download_fonts_async(content_url, material_id, signature)
+            extracted = await self._download_fonts_async(content_url, material_id, sig)
 
             saved_font_urls: dict[str, str] = {}
             for basename, temp_path in extracted["font_files"].items():

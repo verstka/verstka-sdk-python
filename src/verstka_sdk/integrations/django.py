@@ -36,6 +36,16 @@ from ..storage import AsyncStorageAdapter
 from ._base import map_exception
 
 
+def _read_callback_signature(request: HttpRequest) -> str:
+    """Extract ``X-Verstka-Signature`` from Django (``headers`` or ``META``)."""
+    headers = getattr(request, "headers", None)
+    if headers is not None:
+        raw = headers.get("X-Verstka-Signature")
+        if raw:
+            return str(raw).strip()
+    return str(request.META.get("HTTP_X_VERSTKA_SIGNATURE") or "").strip()
+
+
 def _load_payload(request: HttpRequest) -> dict[str, Any]:
     content_type = (request.content_type or "").split(";")[0].strip().lower()
     if content_type != "application/json":
@@ -67,8 +77,10 @@ def build_callback_views(
             return HttpResponseNotAllowed(["POST"])
         try:
             payload = _load_payload(request)
+            signature = _read_callback_signature(request)
             result = await client.process_material_callback(
                 payload,
+                signature=signature,
                 storage=storage,
                 on_finalize=on_content_finalize,
                 on_pre_save=on_content_pre_save,
@@ -83,8 +95,10 @@ def build_callback_views(
             return HttpResponseNotAllowed(["POST"])
         try:
             payload = _load_payload(request)
+            signature = _read_callback_signature(request)
             result = await client.process_fonts_callback(
                 payload,
+                signature=signature,
                 storage=storage,
                 on_finalize=on_fonts_finalize,
                 on_pre_save=on_fonts_pre_save,

@@ -26,15 +26,14 @@ from verstka_sdk.exceptions import VerstkaCallbackDataError, VerstkaSignatureErr
 
 def _callback_payload(
     *,
-    sign,
     content_url: str,
     material_id: str = "M1",
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """JSON body for callbacks (HMAC lives in ``X-Verstka-Signature`` only)."""
     return {
         "material_id": material_id,
         "content_url": content_url,
-        "signature": sign(material_id, content_url),
         "metadata": metadata or {},
     }
 
@@ -142,7 +141,8 @@ async def test_process_material_callback_happy_path(
 
     processor = CallbackProcessor(config)
     result = await processor.process_material_callback_async(
-        _callback_payload(sign=sign, content_url=content_url, metadata={"site": "s1"}),
+        _callback_payload(content_url=content_url, metadata={"site": "s1"}),
+        signature=sign("M1", content_url),
         storage=storage,
         on_finalize=on_finalize,
     )
@@ -168,7 +168,6 @@ async def test_process_material_callback_rejects_bad_signature(config: VerstkaCo
     payload = {
         "material_id": "M1",
         "content_url": content_url,
-        "signature": "wrong",
         "metadata": {},
     }
 
@@ -180,6 +179,39 @@ async def test_process_material_callback_rejects_bad_signature(config: VerstkaCo
     with pytest.raises(VerstkaSignatureError):
         await processor.process_material_callback_async(
             payload,
+            signature="wrong",
+            storage=AsyncRecordingMediaStorage(),
+            on_finalize=_never,
+        )
+
+
+@respx.mock
+async def test_body_signature_ignored_when_header_empty(
+    config: VerstkaConfig, sign, build_content_zip
+) -> None:
+    """Valid ``signature`` in JSON must not satisfy verification without header value."""
+    content_url = "https://verstka.test/download/header-only"
+    zip_bytes = build_content_zip(
+        media={"x.png": b"b"}, vms_html="<img src=dummy-x.png>", vms_json={}
+    ).read_bytes()
+    respx.get(url__startswith=content_url).mock(
+        return_value=httpx.Response(200, content=zip_bytes)
+    )
+    payload = {
+        "material_id": "M1",
+        "content_url": content_url,
+        "signature": sign("M1", content_url),
+        "metadata": {},
+    }
+    processor = CallbackProcessor(config)
+
+    async def _never(_ctx: ContentFinalizeContext) -> ContentFinalizeResult:
+        raise AssertionError("on_finalize must not be called")
+
+    with pytest.raises(VerstkaSignatureError):
+        await processor.process_material_callback_async(
+            payload,
+            signature="",
             storage=AsyncRecordingMediaStorage(),
             on_finalize=_never,
         )
@@ -192,7 +224,6 @@ async def test_process_material_callback_requires_material_id(
     payload = {
         "material_id": "",
         "content_url": "",
-        "signature": sign("", ""),
         "metadata": {},
     }
 
@@ -202,6 +233,7 @@ async def test_process_material_callback_requires_material_id(
     with pytest.raises(VerstkaCallbackDataError):
         await processor.process_material_callback_async(
             payload,
+            signature=sign("", ""),
             storage=AsyncRecordingMediaStorage(),
             on_finalize=_never,
         )
@@ -211,13 +243,14 @@ async def test_process_material_callback_finalize_failure(
     config: VerstkaConfig, sign
 ) -> None:
     processor = CallbackProcessor(config)
-    payload = _callback_payload(sign=sign, content_url="")
+    payload = _callback_payload(content_url="")
 
     async def on_finalize(_ctx):
         return ContentFinalizeResult(success=False)
 
     result = await processor.process_material_callback_async(
         payload,
+        signature=sign("M1", ""),
         storage=AsyncRecordingMediaStorage(),
         on_finalize=on_finalize,
     )
@@ -245,7 +278,8 @@ def test_process_material_callback_sync(
 
     processor = CallbackProcessor(config)
     result = processor.process_material_callback_sync(
-        _callback_payload(sign=sign, content_url=content_url),
+        _callback_payload(content_url=content_url),
+        signature=sign("M1", content_url),
         storage=storage,
         on_finalize=on_finalize,
     )
@@ -286,7 +320,6 @@ async def test_process_fonts_callback(
     callback = {
         "material_id": "site-1",
         "content_url": content_url,
-        "signature": sign("site-1", content_url),
         "metadata": {"tenant": "t42"},
         "fonts": fonts_payload,
     }
@@ -300,6 +333,7 @@ async def test_process_fonts_callback(
     processor = CallbackProcessor(config)
     result = await processor.process_fonts_callback_async(
         callback,
+        signature=sign("site-1", content_url),
         storage=storage,
         on_finalize=on_finalize,
     )
@@ -342,7 +376,6 @@ async def test_process_fonts_callback_returns_default_fonts_when_finalize_omits_
     callback = {
         "material_id": "site-2",
         "content_url": content_url,
-        "signature": sign("site-2", content_url),
         "fonts": {"list": []},
     }
 
@@ -352,6 +385,7 @@ async def test_process_fonts_callback_returns_default_fonts_when_finalize_omits_
     processor = CallbackProcessor(config)
     result = await processor.process_fonts_callback_async(
         callback,
+        signature=sign("site-2", content_url),
         storage=storage,
         on_finalize=on_finalize,
     )
@@ -383,12 +417,15 @@ async def test_process_fonts_callback_without_on_finalize(
     callback = {
         "material_id": "site-3",
         "content_url": content_url,
-        "signature": sign("site-3", content_url),
         "fonts": fonts_payload,
     }
 
     processor = CallbackProcessor(config)
-    result = await processor.process_fonts_callback_async(callback, storage=storage)
+    result = await processor.process_fonts_callback_async(
+        callback,
+        signature=sign("site-3", content_url),
+        storage=storage,
+    )
 
     assert result.success is True
     assert result.fonts["css"]["clientUrl"] == "https://cdn.test/fonts/vms_fonts.css"
@@ -424,7 +461,8 @@ def test_material_pre_save_allows_flow(
 
     processor = CallbackProcessor(config)
     result = processor.process_material_callback_sync(
-        _callback_payload(sign=sign, content_url=content_url, metadata={"site": "s1"}),
+        _callback_payload(content_url=content_url, metadata={"site": "s1"}),
+        signature=sign("M1", content_url),
         storage=storage,
         on_finalize=on_finalize,
         on_pre_save=on_pre_save,
@@ -456,10 +494,10 @@ def test_material_pre_save_rejects_blocks_download_and_storage(
     processor = CallbackProcessor(config)
     result = processor.process_material_callback_sync(
         _callback_payload(
-            sign=sign,
             content_url=content_url,
             metadata={"user_email": "blocked@example.com"},
         ),
+        signature=sign("M1", content_url),
         storage=storage,
         on_finalize=on_finalize,
         on_pre_save=on_pre_save,
@@ -483,7 +521,8 @@ async def test_material_pre_save_async_rejects(config: VerstkaConfig, sign) -> N
 
     processor = CallbackProcessor(config)
     result = await processor.process_material_callback_async(
-        _callback_payload(sign=sign, content_url=content_url),
+        _callback_payload(content_url=content_url),
+        signature=sign("M1", content_url),
         storage=AsyncRecordingMediaStorage(),
         on_finalize=on_finalize,
         on_pre_save=on_pre_save,
@@ -502,7 +541,6 @@ def test_fonts_pre_save_rejects_blocks_download_and_storage(
     callback = {
         "material_id": "site-x",
         "content_url": content_url,
-        "signature": sign("site-x", content_url),
         "metadata": {"fonts_callback_allowed": False},
         "fonts": fonts_payload,
     }
@@ -517,6 +555,7 @@ def test_fonts_pre_save_rejects_blocks_download_and_storage(
     processor = CallbackProcessor(config)
     result = processor.process_fonts_callback_sync(
         callback,
+        signature=sign("site-x", content_url),
         storage=storage,
         on_pre_save=on_pre_save,
     )

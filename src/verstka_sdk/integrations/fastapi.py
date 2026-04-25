@@ -64,14 +64,19 @@ def build_callback_router(
     ZIP download and can short-circuit the flow with
     :class:`~verstka_sdk.finalize.PreSaveDecision` (e.g. to enforce
     per-tenant/per-user access control).
+
+    Callback HMAC must be sent in the ``X-Verstka-Signature`` HTTP header (not
+    in the JSON body).
     """
     router = APIRouter(prefix=prefix, tags=list(tags) if tags else ["verstka"])
 
     @router.post("/callback")
     async def _material_callback(request: Request) -> dict[str, Any]:
         payload: dict[str, Any] = await request.json()
+        signature = (request.headers.get("X-Verstka-Signature") or "").strip()
         result = await client.process_material_callback(
             payload,
+            signature=signature,
             storage=storage,
             on_finalize=on_content_finalize,
             on_pre_save=on_content_pre_save,
@@ -81,8 +86,10 @@ def build_callback_router(
     @router.post("/fonts-callback")
     async def _fonts_callback(request: Request) -> dict[str, Any]:
         payload = await request.json()
+        signature = (request.headers.get("X-Verstka-Signature") or "").strip()
         result = await client.process_fonts_callback(
             payload,
+            signature=signature,
             storage=storage,
             on_finalize=on_fonts_finalize,
             on_pre_save=on_fonts_pre_save,

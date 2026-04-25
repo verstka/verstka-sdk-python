@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import django
 import httpx
 import respx
@@ -91,13 +93,15 @@ async def test_django_callback_happy_path(config: VerstkaConfig, sign, build_con
     client = AsyncClient()
     response = await client.post(
         "/verstka/callback/",
-        data={
-            "material_id": "M1",
-            "content_url": content_url,
-            "signature": sign("M1", content_url),
-            "metadata": {},
-        },
+        data=json.dumps(
+            {
+                "material_id": "M1",
+                "content_url": content_url,
+                "metadata": {},
+            }
+        ),
         content_type="application/json",
+        headers={"X-Verstka-Signature": sign("M1", content_url)},
     )
     assert response.status_code == 200
     body = response.json()
@@ -111,13 +115,15 @@ async def test_django_invalid_signature(config: VerstkaConfig) -> None:
     client = AsyncClient()
     response = await client.post(
         "/verstka/callback/",
-        data={
-            "material_id": "M1",
-            "content_url": "https://x.test",
-            "signature": "wrong",
-            "metadata": {},
-        },
+        data=json.dumps(
+            {
+                "material_id": "M1",
+                "content_url": "https://x.test",
+                "metadata": {},
+            }
+        ),
         content_type="application/json",
+        headers={"X-Verstka-Signature": "wrong"},
     )
     assert response.status_code == 400
     body = response.json()

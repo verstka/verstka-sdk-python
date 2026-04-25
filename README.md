@@ -182,13 +182,12 @@ class S3Storage:
 
 ## Handling the material callback
 
-The payload that Verstka POSTs to your `callback_url` looks like:
+The JSON body that Verstka POSTs to your `callback_url` looks like:
 
 ```json
 {
   "material_id": "42",
   "content_url": "https://api.r2.verstka.org/integration/download/<token>",
-  "signature": "<hmac-sha256>",
   "metadata": {
     "userId": 11,
     "AnyOtherKey": "AnyOtherVal",
@@ -197,6 +196,9 @@ The payload that Verstka POSTs to your `callback_url` looks like:
   }
 }
 ```
+
+The HMAC-SHA256 digest is sent in the **`X-Verstka-Signature`** HTTP header (same
+formula as for `session/open`), not inside the JSON body.
 
 (`user_email` and `user_ip` are written by the editor on each save; your own
 keys such as `siteId` are merged from the session.)
@@ -235,6 +237,7 @@ async def on_content_finalize(ctx: ContentFinalizeContext) -> ContentFinalizeRes
 async with AsyncVerstkaClient(config) as client:
     result = await client.process_material_callback(
         callback_data,
+        signature=request.headers.get("X-Verstka-Signature", ""),
         storage=storage,
         on_finalize=on_content_finalize,
     )
@@ -258,7 +261,8 @@ the HTTP response body under `data.vms_json` if non-`None`.
 
 The SDK does, in order:
 
-1. Verify the HMAC-SHA256 signature (`VerstkaSignatureError` on mismatch).
+1. Verify the HMAC-SHA256 signature from the ``X-Verstka-Signature`` header
+   (`VerstkaSignatureError` on mismatch).
 2. Optionally run `on_pre_save(ContentPreSaveContext)` — validate policy on
    `metadata` (and `material_id`, `content_url`) **before** any download or
    storage. If it returns `PreSaveDecision(allow=False)`, the flow stops here
@@ -282,6 +286,7 @@ def on_content_finalize(ctx: ContentFinalizeContext) -> ContentFinalizeResult:
 with VerstkaClient(config) as client:
     result = client.process_material_callback(
         callback_data,
+        signature=request.headers.get("X-Verstka-Signature", ""),
         storage=storage,
         on_finalize=on_content_finalize,
     )
@@ -296,7 +301,7 @@ manifests.
 
 The SDK:
 
-1. Verifies the signature.
+1. Verifies the signature from the ``X-Verstka-Signature`` header.
 2. Optionally runs `on_pre_save(FontsPreSaveContext)` — same idea as for
    material: validate **before** download/storage; on `allow=False` the flow
    stops with `rc=0` (see [Access control via `on_pre_save` hooks](#access-control-via-on_pre_save-hooks)).
@@ -342,15 +347,19 @@ async def on_fonts_finalize(ctx: FontsFinalizeContext) -> FontsFinalizeResult:
 
 
 async with AsyncVerstkaClient(config) as client:
+    sig = request.headers.get("X-Verstka-Signature", "")
     # With on_finalize — records the saved URLs in the database.
     result = await client.process_fonts_callback(
         callback_data,
+        signature=sig,
         storage=storage,
         on_finalize=on_fonts_finalize,
     )
 
     # Without on_finalize — fonts are still persisted through storage.
-    result = await client.process_fonts_callback(callback_data, storage=storage)
+    result = await client.process_fonts_callback(
+        callback_data, signature=sig, storage=storage
+    )
 
 return result.to_response()
 ```
@@ -418,6 +427,7 @@ def reject_fonts_unless_flag(ctx: FontsPreSaveContext) -> PreSaveDecision:
 
 result = client.process_material_callback(
     callback_data,
+    signature=request.headers.get("X-Verstka-Signature", ""),
     storage=storage,
     on_finalize=on_content_finalize,
     on_pre_save=reject_blacklisted,
@@ -575,7 +585,9 @@ ok = verify_signature("42", content_url, signature, secret)
 ```
 
 Both outgoing `session/open` requests and incoming callbacks use the formula
-`hex(HMAC_SHA256(secret, f"{material_id}:{url}"))`.
+`hex(HMAC_SHA256(secret, f"{material_id}:{url}"))`. The digest is always sent
+in the **`X-Verstka-Signature`** HTTP header (including for incoming
+callbacks); the JSON body does not carry a `signature` field.
 
 ## Errors
 
@@ -594,9 +606,9 @@ All SDK errors inherit from `VerstkaError`:
 | Old service method                       | New API                                                   |
 |------------------------------------------|-----------------------------------------------------------|
 | `VerstkaV2APIService().get_editor(...)`  | `AsyncVerstkaClient.get_editor_url(...)`                  |
-| `process_callback_v2(save_media_fn, finalize_fn)` | `process_material_callback(storage, on_finalize)` |
-| `process_site_fonts_callback(save_font_fn)` | `process_fonts_callback(storage, on_finalize)`         |
-| `verstka_callback_v2_new` decorator      | call `process_material_callback` from your view           |
+| `process_callback_v2(save_media_fn, finalize_fn)` | `process_material_callback(..., signature=header, storage, on_finalize)` |
+| `process_site_fonts_callback(save_font_fn)` | `process_fonts_callback(..., signature=header, storage, on_finalize)`         |
+| `verstka_callback_v2_new` decorator      | call `process_material_callback` with ``X-Verstka-Signature`` from your view |
 | `VerstkaV2APIError`                      | `VerstkaApiError`                                         |
 | `VerstkaV2APIWrongCallbackData`          | `VerstkaSignatureError` / `VerstkaCallbackDataError`      |
 | `VerstkaV2MetadataJsonError`             | `VerstkaMetadataJsonError`                                |

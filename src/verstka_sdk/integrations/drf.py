@@ -29,6 +29,19 @@ from ..storage import StorageAdapter
 from ._base import map_exception
 
 
+def _read_callback_signature(request: Any) -> str:
+    """Extract ``X-Verstka-Signature`` from DRF/django request."""
+    headers = getattr(request, "headers", None)
+    if headers is not None:
+        raw = headers.get("X-Verstka-Signature")
+        if raw:
+            return str(raw).strip()
+    meta = getattr(request, "META", None)
+    if isinstance(meta, dict):
+        return str(meta.get("HTTP_X_VERSTKA_SIGNATURE") or "").strip()
+    return ""
+
+
 def build_callback_views(
     client: VerstkaClient,
     *,
@@ -52,8 +65,10 @@ def build_callback_views(
 
         def post(self, request: Any, *_args: Any, **_kwargs: Any) -> Any:
             payload = request.data or {}
+            signature = _read_callback_signature(request)
             result = client.process_material_callback(
                 payload,
+                signature=signature,
                 storage=storage,
                 on_finalize=on_content_finalize,
                 on_pre_save=on_content_pre_save,
@@ -68,8 +83,10 @@ def build_callback_views(
 
         def post(self, request: Any, *_args: Any, **_kwargs: Any) -> Any:
             payload = request.data or {}
+            signature = _read_callback_signature(request)
             result = client.process_fonts_callback(
                 payload,
+                signature=signature,
                 storage=storage,
                 on_finalize=on_fonts_finalize,
                 on_pre_save=on_fonts_pre_save,

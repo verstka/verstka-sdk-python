@@ -72,9 +72,9 @@ def test_fastapi_callback_happy_path(config: VerstkaConfig, sign, build_content_
             json={
                 "material_id": "M1",
                 "content_url": content_url,
-                "signature": sign("M1", content_url),
                 "metadata": {},
             },
+            headers={"X-Verstka-Signature": sign("M1", content_url)},
         )
     assert response.status_code == 200
     body = response.json()
@@ -90,13 +90,33 @@ def test_fastapi_invalid_signature_maps_to_400(config: VerstkaConfig) -> None:
             json={
                 "material_id": "M1",
                 "content_url": "https://verstka.test/x",
-                "signature": "wrong",
                 "metadata": {},
             },
+            headers={"X-Verstka-Signature": "wrong"},
         )
     assert response.status_code == 400
     body = response.json()
     assert body["code"] == "invalid_signature"
+
+
+def test_fastapi_ignores_body_signature_without_header(
+    config: VerstkaConfig, sign
+) -> None:
+    """``signature`` in JSON is ignored; missing ``X-Verstka-Signature`` fails."""
+    app, _ = _make_app(config)
+    content_url = "https://verstka.test/x"
+    with TestClient(app) as tc:
+        response = tc.post(
+            "/verstka/callback",
+            json={
+                "material_id": "M1",
+                "content_url": content_url,
+                "signature": sign("M1", content_url),
+                "metadata": {},
+            },
+        )
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_signature"
 
 
 def test_install_exception_handlers_emits_json(config: VerstkaConfig) -> None:

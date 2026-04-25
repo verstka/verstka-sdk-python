@@ -96,13 +96,13 @@ def test_drf_callback_happy_path(config: VerstkaConfig, sign, build_content_zip)
     client = APIClient()
     response = client.post(
         "/verstka/callback/",
-        data={
+        {
             "material_id": "M1",
             "content_url": content_url,
-            "signature": sign("M1", content_url),
             "metadata": {},
         },
         format="json",
+        HTTP_X_VERSTKA_SIGNATURE=sign("M1", content_url),
     )
     assert response.status_code == 200
     body = response.json()
@@ -116,13 +116,13 @@ def test_drf_invalid_signature(config: VerstkaConfig) -> None:
     client = APIClient()
     response = client.post(
         "/verstka/callback/",
-        data={
+        {
             "material_id": "M1",
             "content_url": "https://x.test",
-            "signature": "wrong",
             "metadata": {},
         },
         format="json",
+        HTTP_X_VERSTKA_SIGNATURE="wrong",
     )
     assert response.status_code == 400
     body = response.json()

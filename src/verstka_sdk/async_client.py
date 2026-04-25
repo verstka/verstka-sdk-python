@@ -65,6 +65,7 @@ class AsyncVerstkaClient:
         self,
         callback_data: Mapping[str, Any],
         *,
+        signature: str,
         storage: AsyncStorageAdapter,
         on_finalize: AsyncContentFinalizeFn,
         on_pre_save: AsyncContentPreSaveFn | None = None,
@@ -72,6 +73,7 @@ class AsyncVerstkaClient:
         """Async counterpart of :meth:`VerstkaClient.process_material_callback`."""
         return await self._processor.process_material_callback_async(
             callback_data,
+            signature=signature,
             storage=storage,
             on_finalize=on_finalize,
             on_pre_save=on_pre_save,
@@ -81,6 +83,7 @@ class AsyncVerstkaClient:
         self,
         callback_data: Mapping[str, Any],
         *,
+        signature: str,
         storage: AsyncStorageAdapter,
         on_finalize: AsyncFontsFinalizeFn | None = None,
         on_pre_save: AsyncFontsPreSaveFn | None = None,
@@ -88,6 +91,7 @@ class AsyncVerstkaClient:
         """Async counterpart of :meth:`VerstkaClient.process_fonts_callback`."""
         return await self._processor.process_fonts_callback_async(
             callback_data,
+            signature=signature,
             storage=storage,
             on_finalize=on_finalize,
             on_pre_save=on_pre_save,

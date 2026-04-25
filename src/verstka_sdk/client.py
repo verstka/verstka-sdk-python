@@ -76,11 +76,15 @@ class VerstkaClient:
         self,
         callback_data: Mapping[str, Any],
         *,
+        signature: str,
         storage: StorageAdapter,
         on_finalize: ContentFinalizeFn,
         on_pre_save: ContentPreSaveFn | None = None,
     ) -> MaterialCallbackResult:
         """Verify, download, extract, save media and hand off to ``on_finalize``.
+
+        Pass ``signature`` from the incoming HTTP ``X-Verstka-Signature`` header
+        (same hex HMAC as for ``session/open``).
 
         The SDK persists each media file via ``storage.save_media`` and
         rewrites every ``dummy-<filename>`` placeholder in ``vms_html`` and
@@ -93,6 +97,7 @@ class VerstkaClient:
         """
         return self._processor.process_material_callback_sync(
             callback_data,
+            signature=signature,
             storage=storage,
             on_finalize=on_finalize,
             on_pre_save=on_pre_save,
@@ -102,11 +107,14 @@ class VerstkaClient:
         self,
         callback_data: Mapping[str, Any],
         *,
+        signature: str,
         storage: StorageAdapter,
         on_finalize: FontsFinalizeFn | None = None,
         on_pre_save: FontsPreSaveFn | None = None,
     ) -> FontsCallbackResult:
         """Verify, download, extract, save fonts and hand off to ``on_finalize``.
+
+        Pass ``signature`` from the incoming HTTP ``X-Verstka-Signature`` header.
 
         Each font binary is saved via ``storage.save_font_file``; ``vms_fonts.css``
         and ``vms_fonts.json`` are saved via ``storage.save_fonts_manifest``.
@@ -123,6 +131,7 @@ class VerstkaClient:
         """
         return self._processor.process_fonts_callback_sync(
             callback_data,
+            signature=signature,
             storage=storage,
             on_finalize=on_finalize,
             on_pre_save=on_pre_save,

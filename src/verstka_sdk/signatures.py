@@ -6,7 +6,8 @@ with the same formula:
     signature = hex(HMAC_SHA256(secret, f"{material_id}:{url}"))
 
 where ``url`` is the ``callback_url`` for outgoing requests and the
-``content_url`` for incoming callbacks.
+``content_url`` for incoming callbacks. The resulting digest is always placed
+in the ``X-Verstka-Signature`` HTTP header.
 """
 
 from __future__ import annotations

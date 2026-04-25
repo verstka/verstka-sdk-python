@@ -66,9 +66,9 @@ def test_flask_callback_happy_path(config: VerstkaConfig, sign, build_content_zi
             json={
                 "material_id": "M1",
                 "content_url": content_url,
-                "signature": sign("M1", content_url),
                 "metadata": {},
             },
+            headers={"X-Verstka-Signature": sign("M1", content_url)},
         )
     assert response.status_code == 200
     body = response.get_json()
@@ -83,9 +83,9 @@ def test_flask_invalid_signature(config: VerstkaConfig) -> None:
             json={
                 "material_id": "M1",
                 "content_url": "https://x.test",
-                "signature": "wrong",
                 "metadata": {},
             },
+            headers={"X-Verstka-Signature": "wrong"},
         )
     assert response.status_code == 400
     body = response.get_json()
