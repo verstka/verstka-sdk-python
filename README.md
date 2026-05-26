@@ -259,6 +259,25 @@ return result.to_response()
 `ContentFinalizeResult(success, vms_json=None)` — `vms_json` is included in
 the HTTP response body under `data.vms_json` if non-`None`.
 
+## Rendering saved articles
+
+This SDK processes editor callbacks, persists media/fonts through your storage
+adapter, and gives your backend the rewritten `vms_html` and `vms_json`. It does
+not initialize the article in the browser by itself.
+
+To display saved Verstka articles on your site, use the frontend viewer package
+[`verstka-viewer`](https://www.npmjs.com/package/verstka-viewer), or implement
+the same initialization/data-handling behavior in your own frontend using the
+information from that package.
+
+```bash
+npm install verstka-viewer
+```
+
+Serve the saved `vms_html` together with the matching `vms_json` that you
+persisted in `on_finalize`; media and font URLs should be the public URLs
+returned by your `StorageAdapter`.
+
 The SDK does, in order:
 
 1. Verify the HMAC-SHA256 signature from the ``X-Verstka-Signature`` header

@@ -29,7 +29,7 @@ from ..callbacks import (
 )
 from ..exceptions import VerstkaError
 from ..storage import AsyncStorageAdapter
-from ._base import map_exception
+from ._base import is_fonts_callback_payload, map_exception
 
 
 def install_exception_handlers(app: FastAPI) -> None:
@@ -74,6 +74,16 @@ def build_callback_router(
     async def _material_callback(request: Request) -> dict[str, Any]:
         payload: dict[str, Any] = await request.json()
         signature = (request.headers.get("X-Verstka-Signature") or "").strip()
+        if is_fonts_callback_payload(payload):
+            result = await client.process_fonts_callback(
+                payload,
+                signature=signature,
+                storage=storage,
+                on_finalize=on_fonts_finalize,
+                on_pre_save=on_fonts_pre_save,
+            )
+            return result.to_response()
+
         result = await client.process_material_callback(
             payload,
             signature=signature,

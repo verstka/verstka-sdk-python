@@ -33,7 +33,7 @@ from ..callbacks import (
 )
 from ..exceptions import VerstkaCallbackDataError, VerstkaError
 from ..storage import AsyncStorageAdapter
-from ._base import map_exception
+from ._base import is_fonts_callback_payload, map_exception
 
 
 def _read_callback_signature(request: HttpRequest) -> str:
@@ -78,6 +78,16 @@ def build_callback_views(
         try:
             payload = _load_payload(request)
             signature = _read_callback_signature(request)
+            if is_fonts_callback_payload(payload):
+                result = await client.process_fonts_callback(
+                    payload,
+                    signature=signature,
+                    storage=storage,
+                    on_finalize=on_fonts_finalize,
+                    on_pre_save=on_fonts_pre_save,
+                )
+                return JsonResponse(result.to_response())
+
             result = await client.process_material_callback(
                 payload,
                 signature=signature,

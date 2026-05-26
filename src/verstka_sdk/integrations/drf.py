@@ -26,7 +26,7 @@ from ..callbacks import (
 from ..client import VerstkaClient
 from ..exceptions import VerstkaError
 from ..storage import StorageAdapter
-from ._base import map_exception
+from ._base import is_fonts_callback_payload, map_exception
 
 
 def _read_callback_signature(request: Any) -> str:
@@ -66,6 +66,16 @@ def build_callback_views(
         def post(self, request: Any, *_args: Any, **_kwargs: Any) -> Any:
             payload = request.data or {}
             signature = _read_callback_signature(request)
+            if is_fonts_callback_payload(payload):
+                result = client.process_fonts_callback(
+                    payload,
+                    signature=signature,
+                    storage=storage,
+                    on_finalize=on_fonts_finalize,
+                    on_pre_save=on_fonts_pre_save,
+                )
+                return Response(result.to_response())
+
             result = client.process_material_callback(
                 payload,
                 signature=signature,

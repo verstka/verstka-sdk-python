@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +14,8 @@ from ..exceptions import (
     VerstkaSignatureError,
     VerstkaVmsJsonError,
 )
+
+FONTS_CALLBACK_EVENT = "site_fonts_updated"
 
 
 @dataclass(frozen=True)
@@ -52,6 +55,13 @@ def map_exception(exc: BaseException) -> ErrorResponse:
     if isinstance(exc, VerstkaError):
         return ErrorResponse(500, "verstka_error", exc.message)
     return ErrorResponse(500, "internal_error", str(exc) or "Internal server error")
+
+
+def is_fonts_callback_payload(payload: object) -> bool:
+    """Return whether a shared callback payload is a site-fonts event."""
+    if not isinstance(payload, Mapping):
+        return False
+    return payload.get("event") == FONTS_CALLBACK_EVENT
 
 
 def require_extra(module_name: str, extra: str) -> Any:
