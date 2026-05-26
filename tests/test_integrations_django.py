@@ -91,7 +91,6 @@ def _build_urlpatterns(cfg: VerstkaConfig):
     )
     return [
         path("verstka/callback/", views["callback"]),
-        path("verstka/fonts-callback/", views["fonts_callback"]),
     ]
 
 
@@ -103,7 +102,6 @@ def _build_spy_urlpatterns(client: _AsyncSpyClient):
     )
     return [
         path("verstka/callback/", views["callback"]),
-        path("verstka/fonts-callback/", views["fonts_callback"]),
     ]
 
 
@@ -201,6 +199,18 @@ async def test_django_callback_dispatches_material_payload_to_material_flow() ->
     assert spy.material_calls == 1
     assert spy.fonts_calls == 0
     assert response.json()["data"]["flow"] == "material"
+
+
+def test_django_build_callback_views_only_returns_shared_callback(
+    config: VerstkaConfig,
+) -> None:
+    views = build_callback_views(
+        AsyncVerstkaClient(config),
+        storage=_AsyncStubStorage(),
+        on_content_finalize=_on_content_finalize,
+    )
+
+    assert set(views) == {"callback"}
 
 
 async def test_django_invalid_signature(config: VerstkaConfig) -> None:

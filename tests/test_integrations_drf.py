@@ -204,6 +204,18 @@ def test_drf_callback_dispatches_material_payload_to_material_flow() -> None:
     assert response.json()["data"]["flow"] == "material"
 
 
+def test_drf_build_callback_views_only_returns_shared_callback(
+    config: VerstkaConfig,
+) -> None:
+    views = build_callback_views(
+        VerstkaClient(config),
+        storage=_SyncStubStorage(),
+        on_content_finalize=_on_content_finalize,
+    )
+
+    assert set(views) == {"callback"}
+
+
 def test_drf_invalid_signature(config: VerstkaConfig) -> None:
     _set_urlpatterns(_build_urlpatterns(config))
 

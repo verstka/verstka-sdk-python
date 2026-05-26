@@ -503,7 +503,7 @@ app.include_router(
         on_fonts_pre_save=reject_fonts_unless_flag,  # optional access-control hook
     )
 )
-# Always registers both POST /verstka/callback and POST /verstka/fonts-callback.
+# Registers POST /verstka/callback for both material and site_fonts_updated events.
 ```
 
 ### Flask
@@ -551,7 +551,6 @@ views = build_callback_views(
 
 urlpatterns = [
     path("verstka/callback/", views["callback"]),
-    path("verstka/fonts-callback/", views["fonts_callback"]),
 ]
 ```
 
@@ -667,9 +666,10 @@ path you prefer locally.
 - Optional `on_pre_save` hooks (`ContentPreSaveContext` /
   `FontsPreSaveContext` → `PreSaveDecision`) that gate storage writes based
   on `material_id`/`metadata` before any ZIP download.
-- Optional `on_fonts_finalize`: integrations always register
-  `/fonts-callback`; when the hook is omitted the SDK still persists fonts
-  through `storage` and returns the default payload to Verstka.
+- Optional `on_fonts_finalize`: framework integrations dispatch
+  `site_fonts_updated` through the shared `/callback`; when the hook is
+  omitted the SDK still persists fonts through `storage` and returns the
+  default payload to Verstka.
 - Integrations: FastAPI, Flask, Django (async views + middleware), DRF.
 
 ## License

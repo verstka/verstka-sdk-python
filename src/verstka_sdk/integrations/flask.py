@@ -50,11 +50,11 @@ def build_blueprint(
 ) -> Blueprint:
     """Return a Flask ``Blueprint`` exposing callback endpoints.
 
-    Both ``/callback`` and ``/fonts-callback`` are always wired.
-    ``on_fonts_finalize`` is optional when the application only needs the
-    SDK to persist fonts through ``storage``. ``on_*_pre_save`` hooks can
-    reject the whole operation before any ZIP is downloaded based on
-    ``material_id``/``metadata``.
+    The ``/callback`` route handles both material callbacks and
+    ``site_fonts_updated`` font events. ``on_fonts_finalize`` is optional when
+    the application only needs the SDK to persist fonts through ``storage``.
+    ``on_*_pre_save`` hooks can reject the whole operation before any ZIP is
+    downloaded based on ``material_id``/``metadata``.
     """
     blueprint = Blueprint(name, __name__, url_prefix=url_prefix)
 
@@ -80,18 +80,5 @@ def build_blueprint(
             on_pre_save=on_content_pre_save,
         )
         return jsonify(material_result.to_response())
-
-    @blueprint.route("/fonts-callback", methods=["POST"])
-    def _fonts_callback() -> Any:
-        payload = request.get_json(force=True, silent=False) or {}
-        signature = (request.headers.get("X-Verstka-Signature") or "").strip()
-        result = client.process_fonts_callback(
-            payload,
-            signature=signature,
-            storage=storage,
-            on_finalize=on_fonts_finalize,
-            on_pre_save=on_fonts_pre_save,
-        )
-        return jsonify(result.to_response())
 
     return blueprint

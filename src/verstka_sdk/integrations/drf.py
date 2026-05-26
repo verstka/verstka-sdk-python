@@ -51,10 +51,11 @@ def build_callback_views(
     on_content_pre_save: ContentPreSaveFn | None = None,
     on_fonts_pre_save: FontsPreSaveFn | None = None,
 ) -> dict[str, type]:
-    """Return ``{"callback": APIView, "fonts_callback": APIView}``.
+    """Return ``{"callback": APIView}``.
 
-    Both views are always returned; ``on_fonts_finalize`` is optional when
-    the SDK only needs to persist fonts through ``storage``.
+    The callback view handles both material callbacks and ``site_fonts_updated``
+    font events. ``on_fonts_finalize`` is optional when the SDK only needs to
+    persist fonts through ``storage``.
     """
 
     class VerstkaCallbackAPIView(APIView):
@@ -85,27 +86,8 @@ def build_callback_views(
             )
             return Response(material_result.to_response())
 
-    class VerstkaFontsCallbackAPIView(APIView):
-        """DRF view that processes a fonts callback."""
-
-        authentication_classes: list = []
-        permission_classes: list = []
-
-        def post(self, request: Any, *_args: Any, **_kwargs: Any) -> Any:
-            payload = request.data or {}
-            signature = _read_callback_signature(request)
-            result = client.process_fonts_callback(
-                payload,
-                signature=signature,
-                storage=storage,
-                on_finalize=on_fonts_finalize,
-                on_pre_save=on_fonts_pre_save,
-            )
-            return Response(result.to_response())
-
     return {
         "callback": VerstkaCallbackAPIView,
-        "fonts_callback": VerstkaFontsCallbackAPIView,
     }
 
 

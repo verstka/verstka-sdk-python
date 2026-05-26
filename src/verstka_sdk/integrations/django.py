@@ -66,10 +66,11 @@ def build_callback_views(
     on_content_pre_save: AsyncContentPreSaveFn | None = None,
     on_fonts_pre_save: AsyncFontsPreSaveFn | None = None,
 ) -> dict[str, Callable[[HttpRequest], Awaitable[HttpResponse]]]:
-    """Return ``{"callback": view, "fonts_callback": view}`` (async views).
+    """Return ``{"callback": view}`` (async views).
 
-    Both views are always returned; ``on_fonts_finalize`` is optional when
-    the SDK only needs to persist fonts through ``storage``.
+    The callback view handles both material callbacks and ``site_fonts_updated``
+    font events. ``on_fonts_finalize`` is optional when the SDK only needs to
+    persist fonts through ``storage``.
     """
 
     async def _material_view(request: HttpRequest) -> HttpResponse:
@@ -100,25 +101,7 @@ def build_callback_views(
             return JsonResponse(mapped.to_dict(), status=mapped.status)
         return JsonResponse(material_result.to_response())
 
-    async def _fonts_view(request: HttpRequest) -> HttpResponse:
-        if request.method != "POST":
-            return HttpResponseNotAllowed(["POST"])
-        try:
-            payload = _load_payload(request)
-            signature = _read_callback_signature(request)
-            result = await client.process_fonts_callback(
-                payload,
-                signature=signature,
-                storage=storage,
-                on_finalize=on_fonts_finalize,
-                on_pre_save=on_fonts_pre_save,
-            )
-        except VerstkaError as exc:
-            mapped = map_exception(exc)
-            return JsonResponse(mapped.to_dict(), status=mapped.status)
-        return JsonResponse(result.to_response())
-
-    return {"callback": _material_view, "fonts_callback": _fonts_view}
+    return {"callback": _material_view}
 
 
 class VerstkaExceptionMiddleware:

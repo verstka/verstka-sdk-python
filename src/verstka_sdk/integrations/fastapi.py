@@ -53,12 +53,13 @@ def build_callback_router(
     prefix: str = "/verstka",
     tags: Sequence[str | Enum] | None = None,
 ) -> APIRouter:
-    """Return an ``APIRouter`` exposing ``/callback`` and ``/fonts-callback``.
+    """Return an ``APIRouter`` exposing ``/callback``.
 
-    Both routes are always registered. ``on_fonts_finalize`` is optional: when
-    omitted the SDK still persists fonts through ``storage`` and returns the
-    default payload to Verstka, which is enough for static deployments where
-    the font URLs are already known to the templates.
+    Font events (``event == "site_fonts_updated"``) are dispatched from this
+    same callback URL into the fonts flow. ``on_fonts_finalize`` is optional:
+    when omitted the SDK still persists fonts through ``storage`` and returns
+    the default payload to Verstka, which is enough for static deployments
+    where the font URLs are already known to the templates.
 
     ``on_*_pre_save`` hooks receive ``material_id``/``metadata`` *before* any
     ZIP download and can short-circuit the flow with
@@ -92,18 +93,5 @@ def build_callback_router(
             on_pre_save=on_content_pre_save,
         )
         return material_result.to_response()
-
-    @router.post("/fonts-callback")
-    async def _fonts_callback(request: Request) -> dict[str, Any]:
-        payload = await request.json()
-        signature = (request.headers.get("X-Verstka-Signature") or "").strip()
-        result = await client.process_fonts_callback(
-            payload,
-            signature=signature,
-            storage=storage,
-            on_finalize=on_fonts_finalize,
-            on_pre_save=on_fonts_pre_save,
-        )
-        return result.to_response()
 
     return router
