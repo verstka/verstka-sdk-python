@@ -75,23 +75,23 @@ def build_callback_router(
         payload: dict[str, Any] = await request.json()
         signature = (request.headers.get("X-Verstka-Signature") or "").strip()
         if is_fonts_callback_payload(payload):
-            result = await client.process_fonts_callback(
+            fonts_result = await client.process_fonts_callback(
                 payload,
                 signature=signature,
                 storage=storage,
                 on_finalize=on_fonts_finalize,
                 on_pre_save=on_fonts_pre_save,
             )
-            return result.to_response()
+            return fonts_result.to_response()
 
-        result = await client.process_material_callback(
+        material_result = await client.process_material_callback(
             payload,
             signature=signature,
             storage=storage,
             on_finalize=on_content_finalize,
             on_pre_save=on_content_pre_save,
         )
-        return result.to_response()
+        return material_result.to_response()
 
     @router.post("/fonts-callback")
     async def _fonts_callback(request: Request) -> dict[str, Any]:

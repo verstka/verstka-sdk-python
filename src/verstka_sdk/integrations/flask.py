@@ -63,23 +63,23 @@ def build_blueprint(
         payload = request.get_json(force=True, silent=False) or {}
         signature = (request.headers.get("X-Verstka-Signature") or "").strip()
         if is_fonts_callback_payload(payload):
-            result = client.process_fonts_callback(
+            fonts_result = client.process_fonts_callback(
                 payload,
                 signature=signature,
                 storage=storage,
                 on_finalize=on_fonts_finalize,
                 on_pre_save=on_fonts_pre_save,
             )
-            return jsonify(result.to_response())
+            return jsonify(fonts_result.to_response())
 
-        result = client.process_material_callback(
+        material_result = client.process_material_callback(
             payload,
             signature=signature,
             storage=storage,
             on_finalize=on_content_finalize,
             on_pre_save=on_content_pre_save,
         )
-        return jsonify(result.to_response())
+        return jsonify(material_result.to_response())
 
     @blueprint.route("/fonts-callback", methods=["POST"])
     def _fonts_callback() -> Any:

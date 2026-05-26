@@ -67,23 +67,23 @@ def build_callback_views(
             payload = request.data or {}
             signature = _read_callback_signature(request)
             if is_fonts_callback_payload(payload):
-                result = client.process_fonts_callback(
+                fonts_result = client.process_fonts_callback(
                     payload,
                     signature=signature,
                     storage=storage,
                     on_finalize=on_fonts_finalize,
                     on_pre_save=on_fonts_pre_save,
                 )
-                return Response(result.to_response())
+                return Response(fonts_result.to_response())
 
-            result = client.process_material_callback(
+            material_result = client.process_material_callback(
                 payload,
                 signature=signature,
                 storage=storage,
                 on_finalize=on_content_finalize,
                 on_pre_save=on_content_pre_save,
             )
-            return Response(result.to_response())
+            return Response(material_result.to_response())
 
     class VerstkaFontsCallbackAPIView(APIView):
         """DRF view that processes a fonts callback."""

@@ -79,16 +79,16 @@ def build_callback_views(
             payload = _load_payload(request)
             signature = _read_callback_signature(request)
             if is_fonts_callback_payload(payload):
-                result = await client.process_fonts_callback(
+                fonts_result = await client.process_fonts_callback(
                     payload,
                     signature=signature,
                     storage=storage,
                     on_finalize=on_fonts_finalize,
                     on_pre_save=on_fonts_pre_save,
                 )
-                return JsonResponse(result.to_response())
+                return JsonResponse(fonts_result.to_response())
 
-            result = await client.process_material_callback(
+            material_result = await client.process_material_callback(
                 payload,
                 signature=signature,
                 storage=storage,
@@ -98,7 +98,7 @@ def build_callback_views(
         except VerstkaError as exc:
             mapped = map_exception(exc)
             return JsonResponse(mapped.to_dict(), status=mapped.status)
-        return JsonResponse(result.to_response())
+        return JsonResponse(material_result.to_response())
 
     async def _fonts_view(request: HttpRequest) -> HttpResponse:
         if request.method != "POST":
