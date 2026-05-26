@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 from typing import Any
@@ -298,7 +299,23 @@ async def test_process_fonts_callback(
     content_url = "https://verstka.test/fonts/z"
     zip_bytes = build_fonts_zip(
         fonts={"Inter-Regular.woff2": b"FONT"},
-        vms_fonts_json={"families": []},
+        vms_fonts_json={
+            "css": {"id": "vms_fonts.css", "clientUrl": "dummy-fonts.css"},
+            "list": [
+                {
+                    "variants": [
+                        {
+                            "files": {
+                                "woff2": {
+                                    "id": "Inter-Regular.woff2",
+                                    "clientUrl": "dummy-Inter-Regular.woff2",
+                                }
+                            }
+                        }
+                    ]
+                }
+            ],
+        },
         vms_fonts_css="@font-face { src: url(dummy-Inter-Regular.woff2); }",
     ).read_bytes()
     respx.get(url__startswith=content_url).mock(
@@ -356,6 +373,12 @@ async def test_process_fonts_callback(
     css_on_disk = (tmp_path / "fonts" / "vms_fonts.css").read_text()
     assert "dummy-Inter-Regular.woff2" not in css_on_disk
     assert "https://cdn.test/fonts/Inter-Regular.woff2" in css_on_disk
+    json_on_disk = json.loads((tmp_path / "fonts" / "vms_fonts.json").read_text())
+    assert json_on_disk["css"]["clientUrl"] == "https://cdn.test/fonts/vms_fonts.css"
+    assert (
+        json_on_disk["list"][0]["variants"][0]["files"]["woff2"]["clientUrl"]
+        == "https://cdn.test/fonts/Inter-Regular.woff2"
+    )
 
 
 @respx.mock

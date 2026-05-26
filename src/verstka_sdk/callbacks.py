@@ -548,14 +548,15 @@ class CallbackProcessor:
                 material_id=material_id,
                 metadata=metadata,
             )
+            _fill_font_client_urls(fonts_payload, saved_font_urls, css_url=css_url)
             json_url = self._persist_json_sync(
                 json_path=extracted["vms_fonts_json_path"],
+                saved_font_urls=saved_font_urls,
+                css_url=css_url,
                 storage=storage,
                 material_id=material_id,
                 metadata=metadata,
             )
-
-            _fill_font_client_urls(fonts_payload, saved_font_urls, css_url=css_url)
 
             ctx = FontsFinalizeContext(
                 material_id=material_id,
@@ -639,14 +640,15 @@ class CallbackProcessor:
                 material_id=material_id,
                 metadata=metadata,
             )
+            _fill_font_client_urls(fonts_payload, saved_font_urls, css_url=css_url)
             json_url = await self._persist_json_async(
                 json_path=extracted["vms_fonts_json_path"],
+                saved_font_urls=saved_font_urls,
+                css_url=css_url,
                 storage=storage,
                 material_id=material_id,
                 metadata=metadata,
             )
-
-            _fill_font_client_urls(fonts_payload, saved_font_urls, css_url=css_url)
 
             ctx = FontsFinalizeContext(
                 material_id=material_id,
@@ -690,12 +692,15 @@ class CallbackProcessor:
         self,
         *,
         json_path: str | None,
+        saved_font_urls: Mapping[str, str],
+        css_url: str | None,
         storage: StorageAdapter,
         material_id: str,
         metadata: Mapping[str, Any],
     ) -> str | None:
         if not json_path or not os.path.exists(json_path):
             return None
+        _rewrite_fonts_json_in_place(json_path, saved_font_urls, css_url=css_url)
         url = storage.save_fonts_manifest(
             VMS_FONTS_JSON, Path(json_path), material_id, metadata
         )
@@ -724,12 +729,15 @@ class CallbackProcessor:
         self,
         *,
         json_path: str | None,
+        saved_font_urls: Mapping[str, str],
+        css_url: str | None,
         storage: AsyncStorageAdapter,
         material_id: str,
         metadata: Mapping[str, Any],
     ) -> str | None:
         if not json_path or not os.path.exists(json_path):
             return None
+        _rewrite_fonts_json_in_place(json_path, saved_font_urls, css_url=css_url)
         url = await storage.save_fonts_manifest(
             VMS_FONTS_JSON, Path(json_path), material_id, metadata
         )
@@ -820,6 +828,26 @@ def _rewrite_css_in_place(css_path: str, saved_font_urls: Mapping[str, str]) -> 
     patched = _patch_css_urls(css_text, saved_font_urls)
     if patched != css_text:
         path.write_text(patched, encoding="utf-8")
+
+
+def _rewrite_fonts_json_in_place(
+    json_path: str,
+    saved_font_urls: Mapping[str, str],
+    *,
+    css_url: str | None,
+) -> None:
+    """Fill clientUrl values inside ``vms_fonts.json`` before persisting."""
+    path = Path(json_path)
+    try:
+        fonts = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        logger.warning("Failed to parse %s before persisting; saving as-is", VMS_FONTS_JSON)
+        return
+    if not isinstance(fonts, dict):
+        return
+
+    _fill_font_client_urls(fonts, saved_font_urls, css_url=css_url)
+    path.write_text(json.dumps(fonts, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 __all__ = [
