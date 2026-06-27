@@ -106,21 +106,25 @@ def download_zip_sync(
     max_size: int,
     timeout: float,
     headers: Mapping[str, str] | None = None,
+    http_client: httpx.Client | None = None,
 ) -> None:
     """Stream ``url`` into ``dest_path`` using ``httpx.Client``.
 
+    When ``http_client`` is provided it is reused (not closed by this helper).
     Raises ``VerstkaApiError`` on HTTP errors or network failures.
     """
     try:
+        if http_client is not None:
+            with http_client.stream(
+                "GET", url, headers=dict(headers or {}), timeout=timeout
+            ) as response:
+                _process_sync_download_response(response, dest_path, max_size)
+            return
+
         with httpx.Client(timeout=timeout) as client, client.stream(
             "GET", url, headers=dict(headers or {})
         ) as response:
-            mapped = _status_to_error(response.status_code)
-            if mapped is not None:
-                raise mapped
-            response.raise_for_status()
-            _enforce_content_length(response, max_size)
-            _write_stream(response.iter_bytes(CHUNK_SIZE), dest_path, max_size)
+            _process_sync_download_response(response, dest_path, max_size)
     except httpx.HTTPError as exc:
         raise VerstkaApiError(f"Failed to download content: {exc}") from exc
 
@@ -132,28 +136,57 @@ async def download_zip_async(
     max_size: int,
     timeout: float,
     headers: Mapping[str, str] | None = None,
+    http_client: httpx.AsyncClient | None = None,
 ) -> None:
     """Stream ``url`` into ``dest_path`` using ``httpx.AsyncClient``."""
     try:
+        if http_client is not None:
+            async with http_client.stream(
+                "GET", url, headers=dict(headers or {}), timeout=timeout
+            ) as response:
+                await _process_async_download_response(response, dest_path, max_size)
+            return
+
         async with httpx.AsyncClient(timeout=timeout) as client, client.stream(
             "GET", url, headers=dict(headers or {})
         ) as response:
-            mapped = _status_to_error(response.status_code)
-            if mapped is not None:
-                raise mapped
-            response.raise_for_status()
-            _enforce_content_length(response, max_size)
-
-            downloaded = 0
-            with open(dest_path, "wb") as fh:
-                async for chunk in response.aiter_bytes(CHUNK_SIZE):
-                    if not chunk:
-                        continue
-                    fh.write(chunk)
-                    downloaded += len(chunk)
-                    _check_size(downloaded, max_size)
+            await _process_async_download_response(response, dest_path, max_size)
     except httpx.HTTPError as exc:
         raise VerstkaApiError(f"Failed to download content: {exc}") from exc
+
+
+def _process_sync_download_response(
+    response: httpx.Response,
+    dest_path: str | os.PathLike[str],
+    max_size: int,
+) -> None:
+    mapped = _status_to_error(response.status_code)
+    if mapped is not None:
+        raise mapped
+    response.raise_for_status()
+    _enforce_content_length(response, max_size)
+    _write_stream(response.iter_bytes(CHUNK_SIZE), dest_path, max_size)
+
+
+async def _process_async_download_response(
+    response: httpx.Response,
+    dest_path: str | os.PathLike[str],
+    max_size: int,
+) -> None:
+    mapped = _status_to_error(response.status_code)
+    if mapped is not None:
+        raise mapped
+    response.raise_for_status()
+    _enforce_content_length(response, max_size)
+
+    downloaded = 0
+    with open(dest_path, "wb") as fh:
+        async for chunk in response.aiter_bytes(CHUNK_SIZE):
+            if not chunk:
+                continue
+            fh.write(chunk)
+            downloaded += len(chunk)
+            _check_size(downloaded, max_size)
 
 
 def _enforce_content_length(response: httpx.Response, max_size: int) -> None:

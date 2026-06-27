@@ -8,7 +8,7 @@ import httpx
 import pytest
 import respx
 
-from verstka_sdk import AsyncVerstkaClient, VerstkaClient, VerstkaConfig
+from verstka_sdk import AsyncVerstkaClient, VerstkaClient, VerstkaConfig, __version__
 from verstka_sdk.exceptions import VerstkaApiError, VerstkaMetadataJsonError, VerstkaVmsJsonError
 from verstka_sdk.signatures import sign_material
 
@@ -31,7 +31,7 @@ def test_get_editor_url_sync(config: VerstkaConfig) -> None:
     assert body["callback_url"] == config.callback_url
     assert body["material_id"] == "M1"
     assert body["metadata"]["user_id"] == 7
-    assert body["metadata"]["version"] == "2.0"
+    assert body["metadata"]["version"] == f"python_{__version__}"
     assert body["vms_json"] == {"foo": "bar"}
     expected_sig = sign_material("M1", config.callback_url, config.api_secret)
     assert request.headers["X-Verstka-Signature"] == expected_sig
@@ -85,13 +85,15 @@ async def test_get_editor_url_async(config: VerstkaConfig) -> None:
 
 
 @respx.mock
-async def test_basic_auth_metadata(config: VerstkaConfig) -> None:
-    cfg = config.model_copy(update={"basic_auth_user": "u", "basic_auth_password": "p"})
-    route = respx.post(cfg.session_open_url).mock(
+async def test_webhook_auth_metadata(config: VerstkaConfig) -> None:
+    route = respx.post(config.session_open_url).mock(
         return_value=httpx.Response(200, json={"url": "ok"})
     )
-    async with AsyncVerstkaClient(cfg) as client:
-        await client.get_editor_url(material_id="M1")
+    async with AsyncVerstkaClient(config) as client:
+        await client.get_editor_url(
+            material_id="M1",
+            metadata={"webhook_auth_user": "u", "webhook_auth_password": "p"},
+        )
     body = json.loads(route.calls.last.request.content.decode())
-    assert body["metadata"]["webhook_basic_auth_user"] == "u"
-    assert body["metadata"]["webhook_basic_auth_password"] == "p"
+    assert body["metadata"]["webhook_auth_user"] == "u"
+    assert body["metadata"]["webhook_auth_password"] == "p"

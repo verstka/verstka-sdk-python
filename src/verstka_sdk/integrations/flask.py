@@ -24,7 +24,7 @@ from ..callbacks import (
 from ..client import VerstkaClient
 from ..exceptions import VerstkaError
 from ..storage import StorageAdapter
-from ._base import is_fonts_callback_payload, map_exception
+from ._base import dispatch_callback_sync, map_exception
 
 
 def register_error_handlers(app: Flask) -> None:
@@ -62,23 +62,17 @@ def build_blueprint(
     def _material_callback() -> Any:
         payload = request.get_json(force=True, silent=False) or {}
         signature = (request.headers.get("X-Verstka-Signature") or "").strip()
-        if is_fonts_callback_payload(payload):
-            fonts_result = client.process_fonts_callback(
+        return jsonify(
+            dispatch_callback_sync(
+                client,
                 payload,
-                signature=signature,
+                signature,
                 storage=storage,
-                on_finalize=on_fonts_finalize,
-                on_pre_save=on_fonts_pre_save,
+                on_content_finalize=on_content_finalize,
+                on_fonts_finalize=on_fonts_finalize,
+                on_content_pre_save=on_content_pre_save,
+                on_fonts_pre_save=on_fonts_pre_save,
             )
-            return jsonify(fonts_result.to_response())
-
-        material_result = client.process_material_callback(
-            payload,
-            signature=signature,
-            storage=storage,
-            on_finalize=on_content_finalize,
-            on_pre_save=on_content_pre_save,
         )
-        return jsonify(material_result.to_response())
 
     return blueprint

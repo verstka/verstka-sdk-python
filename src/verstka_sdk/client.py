@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -18,8 +17,7 @@ from .callbacks import (
     MaterialCallbackResult,
 )
 from .config import VerstkaConfig
-from .exceptions import VerstkaApiError, VerstkaMetadataJsonError, VerstkaVmsJsonError
-from .signatures import sign_material
+from .session import build_session_payload, parse_editor_response
 from .storage import StorageAdapter
 
 
@@ -37,9 +35,9 @@ class VerstkaClient:
         http_client: httpx.Client | None = None,
     ) -> None:
         self.config = config
-        self._processor = CallbackProcessor(config)
         self._owns_http_client = http_client is None
         self._http_client = http_client or httpx.Client(timeout=config.request_timeout)
+        self._processor = CallbackProcessor(config, sync_http_client=self._http_client)
 
     # ----- lifecycle ---------------------------------------------------- #
 
@@ -63,14 +61,14 @@ class VerstkaClient:
         metadata: str | Mapping[str, Any] | None = None,
     ) -> str:
         """POST ``session/open`` and return the Verstka editor URL."""
-        payload, signature = _build_session_payload(self.config, material_id, vms_json, metadata)
+        payload, signature = build_session_payload(self.config, material_id, vms_json, metadata)
         response = self._http_client.post(
             self.config.session_open_url,
             json=payload,
             headers={"X-Verstka-Signature": signature},
             timeout=self.config.request_timeout,
         )
-        return _parse_editor_response(response)
+        return parse_editor_response(response)
 
     def process_material_callback(
         self,
@@ -136,70 +134,3 @@ class VerstkaClient:
             on_finalize=on_finalize,
             on_pre_save=on_pre_save,
         )
-
-
-def _coerce_json(
-    value: str | Mapping[str, Any] | None, error_cls: type[Exception]
-) -> dict[str, Any] | None:
-    """Coerce ``value`` to a ``dict`` (accepts JSON string or mapping)."""
-    if value is None:
-        return None
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError as exc:
-            raise error_cls(f"{error_cls.__name__}: {exc}") from exc
-    else:
-        parsed = dict(value)
-    if not isinstance(parsed, dict):
-        raise error_cls(f"Expected JSON object, got {type(parsed).__name__}")
-    return parsed
-
-
-def _build_session_payload(
-    config: VerstkaConfig,
-    material_id: str,
-    vms_json: str | Mapping[str, Any] | None,
-    metadata: str | Mapping[str, Any] | None,
-) -> tuple[dict[str, Any], str]:
-    if not material_id:
-        raise VerstkaApiError("material_id is required")
-
-    existing_metadata = _coerce_json(metadata, VerstkaMetadataJsonError) or {}
-    merged_metadata: dict[str, Any] = {"version": "2.0", **existing_metadata}
-
-    if config.basic_auth_user and config.basic_auth_password:
-        merged_metadata["webhook_basic_auth_user"] = config.basic_auth_user
-        merged_metadata["webhook_basic_auth_password"] = config.basic_auth_password
-
-    payload: dict[str, Any] = {
-        "api_key": config.api_key,
-        "callback_url": config.callback_url,
-        "material_id": material_id,
-        "metadata": merged_metadata,
-    }
-
-    vms_json_dict = _coerce_json(vms_json, VerstkaVmsJsonError)
-    if vms_json_dict is not None:
-        payload["vms_json"] = vms_json_dict
-
-    signature = sign_material(material_id, config.callback_url, config.api_secret)
-    return payload, signature
-
-
-def _parse_editor_response(response: httpx.Response) -> str:
-    if response.status_code != 200:
-        raise VerstkaApiError(
-            f"Invalid verstka response: {response.status_code} {response.text}",
-            status_code=response.status_code,
-        )
-    try:
-        data = response.json()
-    except json.JSONDecodeError as exc:
-        raise VerstkaApiError(f"Non-JSON response from Verstka: {exc}") from exc
-    if "url" not in data:
-        raise VerstkaApiError(json.dumps(data))
-    url = data["url"]
-    if not isinstance(url, str) or not url:
-        raise VerstkaApiError(f"Unexpected 'url' value: {url!r}")
-    return url

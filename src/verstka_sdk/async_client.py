@@ -16,7 +16,7 @@ from .callbacks import (
     FontsCallbackResult,
     MaterialCallbackResult,
 )
-from .client import _build_session_payload, _parse_editor_response
+from .session import build_session_payload, parse_editor_response
 from .config import VerstkaConfig
 from .storage import AsyncStorageAdapter
 
@@ -31,9 +31,9 @@ class AsyncVerstkaClient:
         http_client: httpx.AsyncClient | None = None,
     ) -> None:
         self.config = config
-        self._processor = CallbackProcessor(config)
         self._owns_http_client = http_client is None
         self._http_client = http_client or httpx.AsyncClient(timeout=config.request_timeout)
+        self._processor = CallbackProcessor(config, async_http_client=self._http_client)
 
     async def aclose(self) -> None:
         if self._owns_http_client:
@@ -52,14 +52,14 @@ class AsyncVerstkaClient:
         vms_json: str | Mapping[str, Any] | None = None,
         metadata: str | Mapping[str, Any] | None = None,
     ) -> str:
-        payload, signature = _build_session_payload(self.config, material_id, vms_json, metadata)
+        payload, signature = build_session_payload(self.config, material_id, vms_json, metadata)
         response = await self._http_client.post(
             self.config.session_open_url,
             json=payload,
             headers={"X-Verstka-Signature": signature},
             timeout=self.config.request_timeout,
         )
-        return _parse_editor_response(response)
+        return parse_editor_response(response)
 
     async def process_material_callback(
         self,

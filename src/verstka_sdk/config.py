@@ -24,8 +24,6 @@ class VerstkaConfig(BaseModel):
         default=DEFAULT_API_URL,
         description="Base URL of Verstka API (e.g. https://api.r2.verstka.org/integration).",
     )
-    basic_auth_user: str | None = Field(default=None, description="Optional HTTP basic auth user for callback URL.")
-    basic_auth_password: str | None = Field(default=None, description="Optional HTTP basic auth password for callback URL.")
     max_content_size: int = Field(
         default=DEFAULT_MAX_CONTENT_SIZE,
         ge=1,

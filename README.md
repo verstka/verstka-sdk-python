@@ -56,8 +56,6 @@ config = VerstkaConfig(
     max_content_size=100 * 1024 * 1024,      # 100 MiB, default
     request_timeout=60.0,
     download_timeout=120.0,
-    basic_auth_user=None,                    # optional HTTP basic auth for callbacks
-    basic_auth_password=None,
     debug=False,                             # include extra info on errors
 )
 ```

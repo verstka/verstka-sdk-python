@@ -38,6 +38,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+import httpx
+
 from .config import VerstkaConfig
 from .content import (
     ExtractedContent,
@@ -300,8 +302,16 @@ class CallbackProcessor:
     (storage, on_finalize, HTTP) are injected per call.
     """
 
-    def __init__(self, config: VerstkaConfig) -> None:
+    def __init__(
+        self,
+        config: VerstkaConfig,
+        *,
+        sync_http_client: httpx.Client | None = None,
+        async_http_client: httpx.AsyncClient | None = None,
+    ) -> None:
         self.config = config
+        self._sync_http_client = sync_http_client
+        self._async_http_client = async_http_client
 
     # ----- sync: material ------------------------------------------------- #
 
@@ -760,6 +770,7 @@ class CallbackProcessor:
                 max_size=self.config.max_content_size,
                 timeout=self.config.download_timeout,
                 headers={"X-Verstka-Signature": signature},
+                http_client=self._sync_http_client,
             )
             return extract_content_zip(zip_path, temp_dir)
         except Exception:
@@ -778,6 +789,7 @@ class CallbackProcessor:
                 max_size=self.config.max_content_size,
                 timeout=self.config.download_timeout,
                 headers={"X-Verstka-Signature": signature},
+                http_client=self._async_http_client,
             )
             return extract_content_zip(zip_path, temp_dir)
         except Exception:
@@ -796,6 +808,7 @@ class CallbackProcessor:
                 max_size=self.config.max_content_size,
                 timeout=self.config.download_timeout,
                 headers={"X-Verstka-Signature": signature},
+                http_client=self._sync_http_client,
             )
             return extract_fonts_zip(zip_path, temp_dir)
         except Exception:
@@ -814,6 +827,7 @@ class CallbackProcessor:
                 max_size=self.config.max_content_size,
                 timeout=self.config.download_timeout,
                 headers={"X-Verstka-Signature": signature},
+                http_client=self._async_http_client,
             )
             return extract_fonts_zip(zip_path, temp_dir)
         except Exception:

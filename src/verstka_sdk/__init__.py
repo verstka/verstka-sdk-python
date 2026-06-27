@@ -45,7 +45,12 @@ from .storage import (
 )
 from .urls import build_authorized_content_url
 
-__version__ = "0.1.0"
+try:
+    from importlib.metadata import version as _package_version
+
+    __version__ = _package_version("verstka-sdk")
+except Exception:  # pragma: no cover - editable installs without metadata
+    __version__ = "0.1.7"
 
 __all__ = [
     # Clients

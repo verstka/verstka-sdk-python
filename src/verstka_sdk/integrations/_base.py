@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..exceptions import (
     VerstkaApiError,
@@ -14,6 +14,21 @@ from ..exceptions import (
     VerstkaSignatureError,
     VerstkaVmsJsonError,
 )
+
+if TYPE_CHECKING:
+    from ..async_client import AsyncVerstkaClient
+    from ..callbacks import (
+        AsyncContentFinalizeFn,
+        AsyncContentPreSaveFn,
+        AsyncFontsFinalizeFn,
+        AsyncFontsPreSaveFn,
+        ContentFinalizeFn,
+        ContentPreSaveFn,
+        FontsFinalizeFn,
+        FontsPreSaveFn,
+    )
+    from ..client import VerstkaClient
+    from ..storage import AsyncStorageAdapter, StorageAdapter
 
 FONTS_CALLBACK_EVENT = "site_fonts_updated"
 
@@ -62,6 +77,70 @@ def is_fonts_callback_payload(payload: object) -> bool:
     if not isinstance(payload, Mapping):
         return False
     return payload.get("event") == FONTS_CALLBACK_EVENT
+
+
+def dispatch_callback_sync(
+    client: VerstkaClient,
+    payload: Mapping[str, Any],
+    signature: str,
+    *,
+    storage: StorageAdapter,
+    on_content_finalize: ContentFinalizeFn,
+    on_fonts_finalize: FontsFinalizeFn | None = None,
+    on_content_pre_save: ContentPreSaveFn | None = None,
+    on_fonts_pre_save: FontsPreSaveFn | None = None,
+) -> dict[str, Any]:
+    """Route a callback payload to material or fonts processing (sync)."""
+    if is_fonts_callback_payload(payload):
+        fonts_result = client.process_fonts_callback(
+            payload,
+            signature=signature,
+            storage=storage,
+            on_finalize=on_fonts_finalize,
+            on_pre_save=on_fonts_pre_save,
+        )
+        return fonts_result.to_response()
+
+    material_result = client.process_material_callback(
+        payload,
+        signature=signature,
+        storage=storage,
+        on_finalize=on_content_finalize,
+        on_pre_save=on_content_pre_save,
+    )
+    return material_result.to_response()
+
+
+async def dispatch_callback_async(
+    client: AsyncVerstkaClient,
+    payload: Mapping[str, Any],
+    signature: str,
+    *,
+    storage: AsyncStorageAdapter,
+    on_content_finalize: AsyncContentFinalizeFn,
+    on_fonts_finalize: AsyncFontsFinalizeFn | None = None,
+    on_content_pre_save: AsyncContentPreSaveFn | None = None,
+    on_fonts_pre_save: AsyncFontsPreSaveFn | None = None,
+) -> dict[str, Any]:
+    """Route a callback payload to material or fonts processing (async)."""
+    if is_fonts_callback_payload(payload):
+        fonts_result = await client.process_fonts_callback(
+            payload,
+            signature=signature,
+            storage=storage,
+            on_finalize=on_fonts_finalize,
+            on_pre_save=on_fonts_pre_save,
+        )
+        return fonts_result.to_response()
+
+    material_result = await client.process_material_callback(
+        payload,
+        signature=signature,
+        storage=storage,
+        on_finalize=on_content_finalize,
+        on_pre_save=on_content_pre_save,
+    )
+    return material_result.to_response()
 
 
 def require_extra(module_name: str, extra: str) -> Any:
