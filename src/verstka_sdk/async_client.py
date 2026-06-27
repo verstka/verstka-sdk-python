@@ -16,8 +16,8 @@ from .callbacks import (
     FontsCallbackResult,
     MaterialCallbackResult,
 )
-from .session import build_session_payload, parse_editor_response
 from .config import VerstkaConfig
+from .session import build_session_payload, parse_editor_response
 from .storage import AsyncStorageAdapter
 
 
