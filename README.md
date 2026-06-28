@@ -1,8 +1,5 @@
 # verstka-sdk
 
-Python SDK for [Verstka](https://verstka.org) API v2. Open editor sessions,
-verify and process callbacks (material content + site fonts), and plug the
-result into your web framework of choice.
 
 Features:
 
@@ -26,6 +23,9 @@ Features:
   `metadata["user_email"]` / `metadata["user_ip"]` (reserved keys, refreshed
   on every save) or by any **custom** keys you set in `metadata` when opening
   the editor session.
+Python SDK for [Verstka](https://verstka.org) API v2. Handles signatures,
+`session/open`, callback processing, ZIP download, and media/font persistence
+through a storage adapter.
 
 ## Installation
 
@@ -38,12 +38,9 @@ pip install 'verstka-sdk[drf]'       # + Django REST Framework integration
 pip install 'verstka-sdk[all]'       # all integrations
 ```
 
-Python 3.10+ is required.
+Minimum Python version: 3.10.
 
 ## Configuration
-
-All runtime settings live on a single `VerstkaConfig` model that you pass to
-the client:
 
 ```python
 from verstka_sdk import VerstkaConfig
@@ -51,88 +48,114 @@ from verstka_sdk import VerstkaConfig
 config = VerstkaConfig(
     api_key="verstka-api-key",
     api_secret="verstka-api-secret",
-    callback_url="https://app.example.com/verstka/callback",
-    api_url="https://api.r2.verstka.org/integration",   # optional, defaults to prod
-    max_content_size=100 * 1024 * 1024,      # 100 MiB, default
+    callback_url="https://site.example/verstka/callback",
+    api_url="https://api.r2.verstka.org/integration",
+    max_content_size=200 * 1024 * 1024,
     request_timeout=60.0,
     download_timeout=120.0,
-    debug=False,                             # include extra info on errors
+    debug=False,
 )
 ```
 
-## Quickstart
+`api_url` defaults to `https://api.r2.verstka.org/integration`.
+`max_content_size` defaults to 200 MiB when omitted.
 
-### Open an editor session (async)
+## Main methods
+
+| Method | Where | Purpose |
+| --- | --- | --- |
+| `VerstkaClient.get_editor_url(...)` | sync | Opens a session via `POST /session/open` and returns the editor URL. |
+| `AsyncVerstkaClient.get_editor_url(...)` | async | Same for async applications. |
+| `VerstkaClient.process_material_callback(...)` | sync | Handles `article_saved`: signature, ZIP, media, `on_finalize`. |
+| `AsyncVerstkaClient.process_material_callback(...)` | async | Async `article_saved` handler. |
+| `VerstkaClient.process_fonts_callback(...)` | sync | Handles `site_fonts_updated`: signature, fonts ZIP, font files, manifests. |
+| `AsyncVerstkaClient.process_fonts_callback(...)` | async | Async `site_fonts_updated` handler. |
+| `LocalStorageAdapter` | sync | Filesystem reference storage adapter. |
+| `LocalAsyncStorageAdapter` | async | Async reference storage adapter. |
+| `sign_material(...)` | helper | Builds HMAC for `material_id:url`. |
+| `verify_signature(...)` | helper | Verifies HMAC safely. |
+| `build_authorized_content_url(...)` | helper | Adds `api_key` and `material_id` to `content_url` for ZIP download. |
+
+## Open editor
 
 ```python
 from verstka_sdk import AsyncVerstkaClient, VerstkaConfig
 
 async def open_editor(material_id: str, vms_json: dict | None) -> str:
-    config = VerstkaConfig(...)
-    async with AsyncVerstkaClient(config) as client:
+    async with AsyncVerstkaClient(VerstkaConfig(...)) as client:
         return await client.get_editor_url(
             material_id=material_id,
             vms_json=vms_json,
             metadata={
-                "userId": 11,
-                "userIP": "127.0.0.1",
-                "AnyOtherKey": "AnyOtherVal",
+                # optional: "anySiteAdditionalKey": "anySiteAdditionalValue",
+                # optional: "timeLimitedAuthToken": "cms-scope-token",
+                # optional: "customContainers": {},
+                # optional: "webhook_auth_user": "callback-user", # (see Callback Authorization)
+                # optional: "webhook_auth_password": "callback-password",
             },
         )
 ```
 
-Both `vms_json` and `metadata` accept either a `dict` or a JSON string.
+Both `vms_json` and `metadata` accept a `dict` or a JSON string. The SDK sends
+`metadata` as a JSON object and automatically adds
+`version: "python_<sdk-version>"`. For Basic Auth or a Bearer token, pass
+`webhook_auth_user` and optionally `webhook_auth_password` in `metadata` when
+calling `get_editor_url` (see
+[Callback Authorization](https://docs.r2.verstka.org/ru/dev/api-integration.md#callback-authorization)).
 
-### Reserved `metadata` keys (editor)
+Sites usually pass `timeLimitedAuthToken` and `customContainers`, plus any site-specific keys (e.g. `anySiteAdditionalKey`: `anySiteAdditionalValue`).
+Other custom keys are allowed — see
+[`metadata`](https://docs.r2.verstka.org/ru/dev/api-integration.md#metadata) in the API
+docs. Values you pass are echoed in callbacks and available in `StorageAdapter`,
+`on_pre_save`, and `on_finalize`.
 
-The Verstka editor reserves **`user_email`** and **`user_ip`**. On every save
-(callback), it **sets or overwrites** these keys in the `metadata` object you
-receive — values you might pass in `get_editor_url` for those names are **not**
-preserved across saves. Use your own keys (for example `AnyOtherKey`, `internalUserId`,
-`fonts_callback_allowed`) for values your backend must trust; treat
-`user_email` / `user_ip` in callbacks as **editor-supplied** identity and
-network context for policy checks (e.g. PreSave allowlists).
+Service keys: `version_id`, `version_cdate`, `user_email`, `user_ip` — the
+Verstka backend adds or updates them in the callback after save;
+`webhook_auth_user` and `webhook_auth_password` authorize the outgoing callback
+(see
+[Callback Authorization](https://docs.r2.verstka.org/ru/dev/api-integration.md#callback-authorization)).
+Your callback handler usually ignores `webhook_auth_*`.
 
-Fields you add under `metadata` (other than the reserved names above) are echoed
-in save callbacks together with the editor-controlled keys. That lets you
-implement **PreSave** validation in your webhook (see
-[Access control via `on_pre_save` hooks](#access-control-via-on_pre_save-hooks))
-without trusting client-supplied headers alone — as long as you only set
-trusted keys on the server when calling `get_editor_url`.
+Open the editor in a separate tab:
 
-### Open an editor session (sync)
-
-```python
-from verstka_sdk import VerstkaClient, VerstkaConfig
-
-with VerstkaClient(VerstkaConfig(...)) as client:
-    url = client.get_editor_url(material_id="42")
+```html
+<a href="/getEditorUrlScript" target="_blank" rel="noopener noreferrer">
+  Edit in Verstka
+</a>
 ```
 
-## Storage adapters
+## StorageAdapter
 
-The SDK never writes to your storage directly — it delegates to an adapter
-that you provide. Adapters implement one of two protocols:
+The SDK does not know where your site stores files — the adapter does.
 
 ```python
 from pathlib import Path
 from collections.abc import Mapping
 from typing import Any
 
-class StorageAdapter:  # sync contract (used by VerstkaClient)
+class StorageAdapter:
     def save_media(
-        self, filename: str, temp_path: Path,
-        material_id: str, metadata: Mapping[str, Any],
+        self,
+        filename: str,
+        temp_path: Path,
+        material_id: str,
+        metadata: Mapping[str, Any],
     ) -> str: ...
 
     def save_font_file(
-        self, filename: str, temp_path: Path,
-        material_id: str, metadata: Mapping[str, Any],
+        self,
+        filename: str,
+        temp_path: Path,
+        material_id: str,
+        metadata: Mapping[str, Any],
     ) -> str: ...
 
     def save_fonts_manifest(
-        self, filename: str, temp_path: Path,
-        material_id: str, metadata: Mapping[str, Any],
+        self,
+        filename: str,
+        temp_path: Path,
+        material_id: str,
+        metadata: Mapping[str, Any],
     ) -> str: ...
 ```
 
@@ -195,11 +218,9 @@ The JSON body that Verstka POSTs to your `callback_url` looks like:
 }
 ```
 
-The HMAC-SHA256 digest is sent in the **`X-Verstka-Signature`** HTTP header (same
-formula as for `session/open`), not inside the JSON body.
-
-(`user_email` and `user_ip` are written by the editor on each save; your own
-keys such as `siteId` are merged from the session.)
+Each method must persist the file and return a public URL. The SDK substitutes
+these URLs into `vms_html`, `vms_json.assets[*].clientUrl`, `vms_fonts.css`, and
+the `fonts` tree.
 
 You provide:
 
@@ -212,6 +233,7 @@ You provide:
   Use it for **extra validation** on `ctx.metadata` (your session keys merged
   with editor-reserved `user_email` / `user_ip`, which are refreshed on every
   save) **before** the content ZIP is downloaded.
+## Material callback
 
 ```python
 from verstka_sdk import (
@@ -221,454 +243,95 @@ from verstka_sdk import (
 )
 
 async def on_content_finalize(ctx: ContentFinalizeContext) -> ContentFinalizeResult:
-    # ctx.vms_html and ctx.vms_json already have all `dummy-<filename>`
-    # placeholders replaced with public URLs returned by storage.save_media.
-    await db.save_material(
+    await db.save_article(
         material_id=ctx.material_id,
         html=ctx.vms_html,
-        state=ctx.vms_json,
-        metadata=ctx.metadata,
+        vms_json=ctx.vms_json,
+        metadata=dict(ctx.metadata),
     )
     return ContentFinalizeResult(success=True, vms_json=ctx.vms_json)
 
-
-async with AsyncVerstkaClient(config) as client:
-    result = await client.process_material_callback(
-        callback_data,
-        signature=request.headers.get("X-Verstka-Signature", ""),
-        storage=storage,
-        on_finalize=on_content_finalize,
-    )
+result = await client.process_material_callback(
+    callback_data,
+    signature=request.headers.get("X-Verstka-Signature", ""),
+    storage=storage,
+    on_finalize=on_content_finalize,
+)
 
 return result.to_response()
-# → {"rc": 1, "rm": "Saved successfully", "data": {"vms_json": {...}}}
 ```
 
-`ContentFinalizeContext` exposes:
+`ContentFinalizeContext`:
 
-| Field              | Description                                                       |
-|--------------------|-------------------------------------------------------------------|
-| `material_id`      | Material identifier from the callback payload.                    |
-| `metadata`         | `metadata` dict from the callback payload (tenant/site routing).  |
-| `vms_json`         | Rewritten VMS state (`assets[*].clientUrl` updated).              |
-| `vms_html`         | Rewritten HTML (`dummy-<filename>` replaced).                     |
-| `saved_media_urls` | `{filename: public_url}` map returned by `storage.save_media`.    |
+| Field | Purpose |
+| --- | --- |
+| `material_id` | Material ID from your CMS. |
+| `metadata` | Metadata from the callback. |
+| `vms_json` | Article JSON with updated `clientUrl` values. |
+| `vms_html` | Article HTML with `dummy-*` URLs replaced. |
+| `saved_media_urls` | `{filename: public_url}` map. |
 
-`ContentFinalizeResult(success, vms_json=None)` — `vms_json` is included in
-the HTTP response body under `data.vms_json` if non-`None`.
-
-## Rendering saved articles
-
-This SDK processes editor callbacks, persists media/fonts through your storage
-adapter, and gives your backend the rewritten `vms_html` and `vms_json`. It does
-not initialize the article in the browser by itself.
-
-To display saved Verstka articles on your site, use the frontend viewer package
-[`verstka-viewer`](https://www.npmjs.com/package/verstka-viewer), or implement
-the same initialization/data-handling behavior in your own frontend using the
-information from that package.
-
-```bash
-npm install verstka-viewer
-```
-
-Serve the saved `vms_html` together with the matching `vms_json` that you
-persisted in `on_finalize`; media and font URLs should be the public URLs
-returned by your `StorageAdapter`.
-
-The SDK does, in order:
-
-1. Verify the HMAC-SHA256 signature from the ``X-Verstka-Signature`` header
-   (`VerstkaSignatureError` on mismatch).
-2. Optionally run `on_pre_save(ContentPreSaveContext)` — validate policy on
-   `metadata` (and `material_id`, `content_url`) **before** any download or
-   storage. If it returns `PreSaveDecision(allow=False)`, the flow stops here
-   with `rc=0` (see [Access control via `on_pre_save` hooks](#access-control-via-on_pre_save-hooks)).
-3. Stream the content ZIP, refusing to exceed `max_content_size`.
-4. Extract `vms_media/*` into a temp dir and call `storage.save_media` for
-   each file.
-5. Replace every `dummy-<filename>` in `vms_html` with the returned URL and
-   update `vms_json["assets"][<filename>]["clientUrl"]`.
-6. Invoke `on_finalize(ctx)` and use its `ContentFinalizeResult` to shape the
-   HTTP response.
-7. Remove the temp dir, even on errors.
-
-Sync version uses `VerstkaClient` with plain synchronous callables:
+## Fonts callback
 
 ```python
-def on_content_finalize(ctx: ContentFinalizeContext) -> ContentFinalizeResult:
-    db.save_material(ctx.material_id, ctx.vms_html, ctx.vms_json)
-    return ContentFinalizeResult(success=True, vms_json=ctx.vms_json)
-
-with VerstkaClient(config) as client:
-    result = client.process_material_callback(
-        callback_data,
-        signature=request.headers.get("X-Verstka-Signature", ""),
-        storage=storage,
-        on_finalize=on_content_finalize,
-    )
-```
-
-## Handling the fonts callback
-
-Verstka emits a separate `site_fonts_updated` callback when site-level fonts
-change. The payload carries a `fonts` tree and a `content_url` pointing at a
-ZIP with `vms_fonts/*` font binaries and the `vms_fonts.json` / `vms_fonts.css`
-manifests.
-
-The SDK:
-
-1. Verifies the signature from the ``X-Verstka-Signature`` header.
-2. Optionally runs `on_pre_save(FontsPreSaveContext)` — same idea as for
-   material: validate **before** download/storage; on `allow=False` the flow
-   stops with `rc=0` (see [Access control via `on_pre_save` hooks](#access-control-via-on_pre_save-hooks)).
-3. Downloads + extracts the ZIP.
-4. Calls `storage.save_font_file(filename, temp_path, material_id, metadata)`
-   for every binary in `vms_fonts/`.
-5. Rewrites `dummy-<font_id>` placeholders inside `vms_fonts.css` **in
-   memory** before persisting it — your remote storage only receives the
-   final CSS once.
-6. Calls `storage.save_fonts_manifest(...)` for both `vms_fonts.css` and
-   `vms_fonts.json` with the same `(material_id, metadata)` tail.
-7. Fills `clientUrl` fields throughout the `fonts` payload.
-8. Invokes `on_finalize(FontsFinalizeContext)` **when it is provided** and
-   builds the HTTP response.
-
-`on_finalize` is **optional** for the fonts flow. When it is omitted the SDK
-still persists every font binary and manifest through `storage` and returns
-the default payload to Verstka. This is the right default when your templates
-already reference deterministic storage URLs and no extra application state
-needs to change on each fonts update.
-
-```python
-from verstka_sdk import (
-    AsyncVerstkaClient,
-    FontsFinalizeContext,
-    FontsFinalizeResult,
-    LocalAsyncStorageAdapter,
-)
-
-storage = LocalAsyncStorageAdapter(
-    root="/var/www/example.com/public/static/verstka-media",
-    base_url="https://cdn.example.com",
-)
+from verstka_sdk import FontsFinalizeContext, FontsFinalizeResult
 
 async def on_fonts_finalize(ctx: FontsFinalizeContext) -> FontsFinalizeResult:
     await db.save_site_fonts(
-        any_other_key=ctx.metadata.get("AnyOtherKey"),
         fonts=ctx.fonts,
         css_url=ctx.css_url,
         json_url=ctx.json_url,
     )
     return FontsFinalizeResult(success=True, fonts=ctx.fonts)
 
-
-async with AsyncVerstkaClient(config) as client:
-    sig = request.headers.get("X-Verstka-Signature", "")
-    # With on_finalize — records the saved URLs in the database.
-    result = await client.process_fonts_callback(
-        callback_data,
-        signature=sig,
-        storage=storage,
-        on_finalize=on_fonts_finalize,
-    )
-
-    # Without on_finalize — fonts are still persisted through storage.
-    result = await client.process_fonts_callback(
-        callback_data, signature=sig, storage=storage
-    )
-
-return result.to_response()
-```
-
-`FontsFinalizeContext` exposes:
-
-| Field             | Description                                                |
-|-------------------|------------------------------------------------------------|
-| `material_id`     | Identifier from the callback payload (often a post id).    |
-| `metadata`        | `metadata` dict from the callback payload.                 |
-| `fonts`           | Fonts tree with `clientUrl` filled in (binaries + CSS).    |
-| `css_url`         | Public URL of the saved `vms_fonts.css`, or `None`.        |
-| `json_url`        | Public URL of the saved `vms_fonts.json`, or `None`.       |
-| `saved_font_urls` | `{font_id: url}` map returned by `storage.save_font_file`. |
-
-## Access control via `on_pre_save` hooks
-
-Every `process_*_callback` method accepts an optional `on_pre_save` hook that
-runs **after** signature verification and **before** any ZIP download or
-storage write. It receives a lightweight context (`material_id`, `metadata`,
-`content_url`, and for fonts also the declared `fonts` tree) and returns a
-`PreSaveDecision`.
-
-### PreSave: extra validation via `metadata`
-
-PreSave is the right place for **policy and validation** that only needs
-identifiers and business context — not the full ZIP. Typical inputs are your
-keys from `get_editor_url` **plus** editor-reserved `user_email` and `user_ip`
-(see [Reserved `metadata` keys (editor)](#reserved-metadata-keys-editor)); the
-latter are **overwritten by the editor on every save**, so they reflect the
-current save context, not values you tried to set at session open. Examples:
-
-| Check | Idea |
-|-------|------|
-| `metadata["user_email"]` | Editor-supplied on each save — deny if blocked, disposable-domain list, or not in your org’s allowlist. |
-| `metadata["AnyOtherKey"]`  | Reject if the key is disabled or not in your allowlist. |
-| `FontsPreSaveContext.fonts` | Inspect the declared font tree (family names, file ids) against rules your backend owns — e.g. blocklist of font ids, or match against `metadata` keys your server set at session open. |
-| Required keys | Return `PreSaveDecision(allow=False, reason="...")` if a required **custom** key (e.g. `siteId`) is missing, or if your policy requires `user_email` but the editor did not supply it. |
-
-Because PreSave runs **before** `storage.save_*`, a rejection does not write
-partial files to your bucket or disk.
-
-```python
-from verstka_sdk import (
-    ContentPreSaveContext,
-    FontsPreSaveContext,
-    PreSaveDecision,
-)
-
-BLACKLIST = {"blocked@example.com"}
-
-def reject_blacklisted(ctx: ContentPreSaveContext) -> PreSaveDecision:
-    email = ctx.metadata.get("user_email")
-    if not isinstance(email, str) or "@" not in email:
-        return PreSaveDecision(allow=False, reason="Invalid user_email in metadata")
-    if email.lower() in BLACKLIST:
-        return PreSaveDecision(allow=False, reason="User blacklisted")
-    return PreSaveDecision(allow=True)
-
-def reject_fonts_unless_flag(ctx: FontsPreSaveContext) -> PreSaveDecision:
-    # Your server sets this when opening the editor (client never invents it).
-    if not ctx.metadata.get("fonts_callback_allowed"):
-        return PreSaveDecision(allow=False, reason="Fonts callback not enabled")
-    return PreSaveDecision(allow=True)
-
-result = client.process_material_callback(
+result = await client.process_fonts_callback(
     callback_data,
     signature=request.headers.get("X-Verstka-Signature", ""),
     storage=storage,
-    on_finalize=on_content_finalize,
-    on_pre_save=reject_blacklisted,
+    on_finalize=on_fonts_finalize,
 )
 ```
 
-When `PreSaveDecision(allow=False, reason=...)` is returned the SDK:
+`on_finalize` for fonts is optional. Without it, the SDK still saves files via
+`storage` and returns the `fonts` tree with `clientUrl` to Verstka.
 
-- skips the ZIP download entirely (no bandwidth is spent on rejected payloads);
-- skips every `storage.save_*` call and the `on_finalize` hook;
-- responds to Verstka with `rc=0` and the provided `reason` as `rm`.
+## PreSave hooks
 
-The async client expects an async callable with the same signature. A reason
-of `None` falls back to `"Operation rejected"` in the HTTP body.
+Both callback methods accept `on_pre_save`. The hook runs after signature
+verification but before ZIP download — use it for permissions, locks, quotas,
+and tenant policy.
+
+```python
+from verstka_sdk import ContentPreSaveContext, PreSaveDecision
+
+def can_save(ctx: ContentPreSaveContext) -> PreSaveDecision:
+    if not user_can_edit(ctx.metadata.get("timeLimitedAuthToken"), ctx.material_id):
+        return PreSaveDecision(allow=False, reason="Access denied")
+    return PreSaveDecision(allow=True)
+```
+
+If `allow=False`, the SDK skips the ZIP download, writes no files, and responds
+to Verstka with `rc: 0`.
 
 ## Framework integrations
 
-All integrations are optional. The SDK's core code raises only its own
-`VerstkaError` subclasses; each integration maps them to JSON responses:
+| Framework | Tooling |
+| --- | --- |
+| FastAPI | `install_exception_handlers(app)`, `build_callback_router(...)` |
+| Flask | `register_error_handlers(app)`, `build_blueprint(...)` |
+| Django | `build_callback_views(...)`, `VerstkaExceptionMiddleware` |
+| DRF | `build_callback_views(...)`, `verstka_exception_handler` |
 
-| Exception                   | HTTP status | `code`                    |
-|-----------------------------|-------------|---------------------------|
-| `VerstkaSignatureError`     | 400         | `invalid_signature`       |
-| `VerstkaCallbackDataError`  | 400         | `invalid_callback_data`   |
-| `VerstkaVmsJsonError`       | 400         | `invalid_vms_json`        |
-| `VerstkaMetadataJsonError`  | 400         | `invalid_metadata_json`   |
-| `VerstkaApiError`           | `status_code` or 502 | `verstka_api_error` |
-| `VerstkaError` (other)      | 500         | `verstka_error`           |
+Framework adapters register a single callback endpoint and dispatch to
+`process_material_callback` or `process_fonts_callback` based on `event`.
 
-Response body shape: `{"error": "<code>", "code": "<code>", "message": "..."}`.
+## Documentation
 
-### FastAPI
+Full integration guide (Russian):
+[frontend/docs/ru/dev/sdk-python.md](https://docs.r2.verstka.org/ru/dev/sdk-python.md)
 
-```python
-from fastapi import FastAPI
-from verstka_sdk import AsyncVerstkaClient, LocalAsyncStorageAdapter, VerstkaConfig
-from verstka_sdk.integrations.fastapi import (
-    install_exception_handlers,
-    build_callback_router,
-)
-
-app = FastAPI()
-client = AsyncVerstkaClient(VerstkaConfig(...))
-storage = LocalAsyncStorageAdapter(root="/srv/media", base_url="https://cdn.example.com")
-
-install_exception_handlers(app)
-app.include_router(
-    build_callback_router(
-        client,
-        storage=storage,
-        on_content_finalize=on_content_finalize,
-        on_fonts_finalize=on_fonts_finalize,   # optional
-        on_content_pre_save=reject_blacklisted,  # optional access-control hook
-        on_fonts_pre_save=reject_fonts_unless_flag,  # optional access-control hook
-    )
-)
-# Registers POST /verstka/callback for both material and site_fonts_updated events.
-```
-
-### Flask
-
-```python
-from flask import Flask
-from verstka_sdk import LocalStorageAdapter, VerstkaClient, VerstkaConfig
-from verstka_sdk.integrations.flask import (
-    register_error_handlers,
-    build_blueprint,
-)
-
-app = Flask(__name__)
-client = VerstkaClient(VerstkaConfig(...))
-storage = LocalStorageAdapter(root="/srv/media", base_url="https://cdn.example.com")
-
-register_error_handlers(app)
-app.register_blueprint(
-    build_blueprint(
-        client,
-        storage=storage,
-        on_content_finalize=on_content_finalize,
-        on_fonts_finalize=on_fonts_finalize,   # optional
-    )
-)
-```
-
-### Django (async views)
-
-```python
-# urls.py
-from django.urls import path
-from verstka_sdk import AsyncVerstkaClient, LocalAsyncStorageAdapter, VerstkaConfig
-from verstka_sdk.integrations.django import build_callback_views
-
-client = AsyncVerstkaClient(VerstkaConfig(...))
-storage = LocalAsyncStorageAdapter(root="/srv/media", base_url="https://cdn.example.com")
-
-views = build_callback_views(
-    client,
-    storage=storage,
-    on_content_finalize=on_content_finalize,
-    on_fonts_finalize=on_fonts_finalize,   # optional
-)
-
-urlpatterns = [
-    path("verstka/callback/", views["callback"]),
-]
-```
-
-Optionally install the exception middleware:
-
-```python
-# settings.py
-MIDDLEWARE = [
-    ...,
-    "verstka_sdk.integrations.django.VerstkaExceptionMiddleware",
-]
-```
-
-### Django REST Framework
-
-```python
-# urls.py
-from django.urls import path
-from verstka_sdk import LocalStorageAdapter, VerstkaClient, VerstkaConfig
-from verstka_sdk.integrations.drf import build_callback_views
-
-client = VerstkaClient(VerstkaConfig(...))
-storage = LocalStorageAdapter(root="/srv/media", base_url="https://cdn.example.com")
-
-views = build_callback_views(
-    client,
-    storage=storage,
-    on_content_finalize=on_content_finalize,
-)
-
-urlpatterns = [
-    path("verstka/callback/", views["callback"].as_view()),
-]
-
-# settings.py
-REST_FRAMEWORK = {
-    "EXCEPTION_HANDLER": "verstka_sdk.integrations.drf.verstka_exception_handler",
-}
-```
-
-## Signatures
-
-If you need to sign or verify manually:
-
-```python
-from verstka_sdk import sign_material, verify_signature
-
-sig = sign_material(material_id="42", url=callback_url, secret=secret)
-ok = verify_signature("42", content_url, signature, secret)
-```
-
-Both outgoing `session/open` requests and incoming callbacks use the formula
-`hex(HMAC_SHA256(secret, f"{material_id}:{url}"))`. The digest is always sent
-in the **`X-Verstka-Signature`** HTTP header (including for incoming
-callbacks); the JSON body does not carry a `signature` field.
-
-## Errors
-
-All SDK errors inherit from `VerstkaError`:
-
-- `VerstkaSignatureError` — signature missing or invalid.
-- `VerstkaCallbackDataError` — callback payload is malformed.
-- `VerstkaApiError` — non-2xx response from Verstka API or content endpoint
-  (carries `status_code`).
-- `VerstkaContentTooLargeError` — downloaded ZIP exceeds `max_content_size`
-  (subclass of `VerstkaApiError`).
-- `VerstkaVmsJsonError`, `VerstkaMetadataJsonError` — invalid JSON input.
-
-## Migrating from `verstka_api_v2.py`
-
-| Old service method                       | New API                                                   |
-|------------------------------------------|-----------------------------------------------------------|
-| `VerstkaV2APIService().get_editor(...)`  | `AsyncVerstkaClient.get_editor_url(...)`                  |
-| `process_callback_v2(save_media_fn, finalize_fn)` | `process_material_callback(..., signature=header, storage, on_finalize)` |
-| `process_site_fonts_callback(save_font_fn)` | `process_fonts_callback(..., signature=header, storage, on_finalize)`         |
-| `verstka_callback_v2_new` decorator      | call `process_material_callback` with ``X-Verstka-Signature`` from your view |
-| `VerstkaV2APIError`                      | `VerstkaApiError`                                         |
-| `VerstkaV2APIWrongCallbackData`          | `VerstkaSignatureError` / `VerstkaCallbackDataError`      |
-| `VerstkaV2MetadataJsonError`             | `VerstkaMetadataJsonError`                                |
-| `VerstkaV2VmsJsonError`                  | `VerstkaVmsJsonError`                                     |
-| `app.config.get_settings()`              | `VerstkaConfig(...)`                                      |
-| `raise HTTPException(...)`               | handled by `install_exception_handlers(app)`              |
-
-The callback response shape is identical:
-`{"rc": 1/0, "rm": "...", "data": {...}}`.
-
-## Development
-
-```bash
-python3.10 -m venv venv
-source venv/bin/activate   # Windows: venv\Scripts\activate
-pip install -e '.[dev]'
-
-pytest
-ruff check src tests
-mypy src
-```
-
-The repository `.gitignore` ignores both `venv/` and `.venv/` — use whichever
-path you prefer locally.
-
-## Changelog
-
-### 0.1.0
-
-- Initial release. Extracted from in-house `verstka_api_v2.py`.
-- Sync + async clients on `httpx`.
-- `StorageAdapter` / `AsyncStorageAdapter` protocols with reference
-  `LocalStorageAdapter` / `LocalAsyncStorageAdapter` implementations.
-- Typed `ContentFinalizeContext` / `FontsFinalizeContext` with
-  `saved_media_urls` / `saved_font_urls` fields; `*FinalizeResult` to shape
-  the outgoing HTTP response.
-- Optional `on_pre_save` hooks (`ContentPreSaveContext` /
-  `FontsPreSaveContext` → `PreSaveDecision`) that gate storage writes based
-  on `material_id`/`metadata` before any ZIP download.
-- Optional `on_fonts_finalize`: framework integrations dispatch
-  `site_fonts_updated` through the shared `/callback`; when the hook is
-  omitted the SDK still persists fonts through `storage` and returns the
-  default payload to Verstka.
-- Integrations: FastAPI, Flask, Django (async views + middleware), DRF.
+Related: [API integration](https://docs.r2.verstka.org/ru/dev/ru/dev/api-integration.md),
+[site integration](https://docs.r2.verstka.org/ru/dev/site-integration.md).
 
 ## License
 
