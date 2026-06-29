@@ -50,7 +50,7 @@ try:
 
     __version__ = _package_version("verstka-sdk")
 except Exception:  # pragma: no cover - editable installs without metadata
-    __version__ = "0.1.7"
+    __version__ = "0.1.8"
 
 __all__ = [
     # Clients
