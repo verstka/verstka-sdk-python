@@ -313,6 +313,58 @@ def can_save(ctx: ContentPreSaveContext) -> PreSaveDecision:
 If `allow=False`, the SDK skips the ZIP download, writes no files, and responds
 to Verstka with `rc: 0`.
 
+## Unified callback endpoint
+
+Use one callback route for both material and fonts events. Import dispatch helpers
+from `verstka_sdk.integrations._base` — the same functions used inside FastAPI,
+Flask, Django, and DRF adapters:
+
+```python
+from verstka_sdk import (
+    AsyncVerstkaClient,
+    ContentFinalizeContext,
+    ContentFinalizeResult,
+    FontsFinalizeContext,
+    FontsFinalizeResult,
+)
+from verstka_sdk.integrations._base import dispatch_callback_async, map_exception
+
+async def on_content_finalize(ctx: ContentFinalizeContext) -> ContentFinalizeResult:
+    await db.save_article(
+        material_id=ctx.material_id,
+        html=ctx.vms_html,
+        vms_json=ctx.vms_json,
+    )
+    return ContentFinalizeResult(success=True, vms_json=ctx.vms_json)
+
+async def on_fonts_finalize(ctx: FontsFinalizeContext) -> FontsFinalizeResult:
+    await db.save_site_fonts(fonts=ctx.fonts, css_url=ctx.css_url)
+    return FontsFinalizeResult(success=True, fonts=ctx.fonts)
+
+async def verstka_callback(request):
+    callback_data = await request.json()
+    signature = request.headers.get("X-Verstka-Signature", "")
+
+    try:
+        async with AsyncVerstkaClient(config) as client:
+            return await dispatch_callback_async(
+                client,
+                callback_data,
+                signature,
+                storage=storage,
+                on_content_finalize=on_content_finalize,
+                on_fonts_finalize=on_fonts_finalize,
+            )
+    except Exception as exc:
+        error = map_exception(exc)
+        return JSONResponse(error.to_dict(), status_code=error.status)
+```
+
+For sync apps, use `dispatch_callback_sync` with `VerstkaClient` instead.
+
+The dispatcher reads `callback_data["event"]`: `site_fonts_updated` routes to the
+fonts flow, everything else to the material flow.
+
 ## Framework integrations
 
 | Framework | Tooling |
@@ -322,8 +374,8 @@ to Verstka with `rc: 0`.
 | Django | `build_callback_views(...)`, `VerstkaExceptionMiddleware` |
 | DRF | `build_callback_views(...)`, `verstka_exception_handler` |
 
-Framework adapters register a single callback endpoint and dispatch to
-`process_material_callback` or `process_fonts_callback` based on `event`.
+Framework adapters register a single callback endpoint and call
+`dispatch_callback_async` or `dispatch_callback_sync` internally.
 
 ## Documentation
 
