@@ -112,7 +112,7 @@ docs. Values you pass are echoed in callbacks and available in `StorageAdapter`,
 Service keys: `version_id`, `version_cdate`, `user_email`, `user_ip` — the
 Verstka backend adds or updates them in the callback after save;
 `webhook_auth_user` and `webhook_auth_password` authorize the outgoing callback
-(see
+and session-restore GET requests to `clientUrl` (see
 [Callback Authorization](https://docs.r2.verstka.org/ru/dev/api-integration.md#callback-authorization)).
 Your callback handler usually ignores `webhook_auth_*`.
 
